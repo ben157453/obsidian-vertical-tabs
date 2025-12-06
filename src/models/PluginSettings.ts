@@ -36,6 +36,7 @@ interface ObsidianVerticalTabsSettings {
 	autoHideHorizontalTabs: boolean;
 	disableOnThisDevice: boolean;
 	enableUpdateCheck: boolean;
+	showNewTabButtonAtBottom: boolean;
 }
 
 export const DEFAULT_SETTINGS: ObsidianVerticalTabsSettings = {
@@ -73,6 +74,7 @@ export const DEFAULT_SETTINGS: ObsidianVerticalTabsSettings = {
 	autoHideHorizontalTabs: false,
 	disableOnThisDevice: false,
 	enableUpdateCheck: true,
+	showNewTabButtonAtBottom: false,
 };
 
 export type Settings = ObsidianVerticalTabsSettings;
