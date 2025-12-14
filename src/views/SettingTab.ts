@@ -3,8 +3,10 @@ import {
 	Notice,
 	Platform,
 	PluginSettingTab,
+	requireApiVersion,
 	setIcon,
 	Setting,
+	SettingGroup,
 } from "obsidian";
 import ObsidianVerticalTabs from "../main";
 import { DISABLE_KEY, useSettings } from "../models/PluginContext";
@@ -61,6 +63,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	constructor(app: App, plugin: ObsidianVerticalTabs) {
 		super(app, plugin);
 		this.plugin = plugin;
+		if (requireApiVersion("1.11.0")) {
+			this.icon = "vertical-tabs";
+		}
 	}
 
 	private refresh() {
@@ -100,50 +105,93 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 
 	// Setting Components
 
-	private createToggle(parentEl: HTMLElement, props: ToggleProps) {
+	private createSettingGroup(parentEl: HTMLElement, name?: string) {
+		if (requireApiVersion("1.11.0")) {
+			const group = new SettingGroup(parentEl);
+			if (name) group.setHeading(name);
+			return group;
+		} else {
+			if (name) new Setting(parentEl).setName(name).setHeading();
+			return parentEl;
+		}
+	}
+
+	// prettier-ignore
+	private createSetting(parentEl: HTMLElement | SettingGroup, callback?: (setting: Setting) => void) {
+		if (requireApiVersion("1.11.0") && parentEl instanceof SettingGroup) {
+			let setting: Setting | undefined;
+			parentEl.addSetting((s) => { setting = s; if(callback) callback(s); });
+			if (!setting) throw new Error("Failed to create setting");
+			return setting;
+		} else if (parentEl instanceof HTMLElement) {
+			const setting = new Setting(parentEl);
+			if(callback) callback(setting);
+			return setting;
+		} else {
+			throw new Error("Invalid parent element or unsupported API version");
+		}
+	}
+
+	private createToggle(
+		parentEl: HTMLElement | SettingGroup,
+		props: ToggleProps
+	) {
 		const { name, desc, value, onChange } = props;
-		const toggleEl = new Setting(parentEl)
-			.setName(name)
-			.addToggle((toggle) => {
+		const toggleEl = this.createSetting(parentEl, (setting) =>
+			setting.setName(name).addToggle((toggle) => {
 				toggle.setValue(value).onChange(onChange);
-			});
+			})
+		);
 		if (desc) toggleEl.setDesc(desc);
 		return toggleEl;
 	}
 
-	private createSlider(parentEl: HTMLElement, props: SliderProps) {
+	private createSlider(
+		parentEl: HTMLElement | SettingGroup,
+		props: SliderProps
+	) {
 		const { name, desc, value, onChange, onReset } = props;
 		const { currentValue, defaultValue, limits } = value;
 		const resetHandler = onReset ?? (() => onChange(defaultValue));
-		const sliderEl = new Setting(parentEl)
-			.setName(name)
-			.addExtraButton((button) => {
-				button
-					.setIcon("reset")
-					.setTooltip("Reset to default")
-					.onClick(() => {
-						resetHandler();
-						this.refresh();
-					});
-			})
-			.addSlider((slider) => {
-				slider
-					.setLimits(limits.min, limits.max, limits.step)
-					.setValue(currentValue)
-					.setDynamicTooltip()
-					.onChange(onChange);
-			});
+		const sliderEl = this.createSetting(parentEl, (setting) => {
+			setting
+				.setName(name)
+				.addExtraButton((button) => {
+					button
+						.setIcon("reset")
+						.setTooltip("Reset to default")
+						.onClick(() => {
+							resetHandler();
+							this.refresh();
+						});
+				})
+				.addSlider((slider) => {
+					slider
+						.setLimits(limits.min, limits.max, limits.step)
+						.setValue(currentValue)
+						.setDynamicTooltip()
+						.onChange(onChange);
+				});
+		});
 		if (desc) sliderEl.setDesc(desc);
 		return sliderEl;
 	}
 
-	private createDropdown(parentEl: HTMLElement, props: DropdownProps) {
+	private createDropdown(
+		parentEl: HTMLElement | SettingGroup,
+		props: DropdownProps
+	) {
 		const { name, desc, options, value, onChange, onReset } = props;
-		const dropdownEl = new Setting(parentEl)
-			.setName(name)
-			.addDropdown((dropdown) =>
-				dropdown.addOptions(options).setValue(value).onChange(onChange)
-			);
+		const dropdownEl = this.createSetting(parentEl, (setting) =>
+			setting
+				.setName(name)
+				.addDropdown((dropdown) =>
+					dropdown
+						.addOptions(options)
+						.setValue(value)
+						.onChange(onChange)
+				)
+		);
 		if (desc) dropdownEl.setDesc(desc);
 		if (onReset) {
 			dropdownEl.addExtraButton((button) =>
@@ -159,15 +207,28 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	// Update Checker
 
 	private displayUpdateIndicator(containerEl: HTMLElement) {
-		const entry = new Setting(containerEl).setName("Updates");
+		const group = this.createSettingGroup(containerEl);
+		const entry = this.createSetting(group, (s) => s.setName("Updates"));
 		if (this.isBetaVersion(this.plugin.manifest.version)) {
-			entry.descEl.innerHTML = `
-				You are running beta version ${this.plugin.manifest.version}.
-				Beta updates are managed by the
-				<a href="https://github.com/oxdc/obsidian-vertical-tabs-beta-helper" target="_blank">Beta Helper</a>
-				plugin. For more information, please refer to the
-				<a href="https://vertical-tabs-docs.oxdc.dev/Beta-Versions/beta-program" target="_blank">Beta Program documentation</a>.
-			`;
+			const betaVersionInfo = entry.descEl.createSpan({
+				cls: "vt-beta-version-info",
+			});
+			betaVersionInfo.appendText(
+				`You are running beta version ${this.plugin.manifest.version}. Beta updates are managed by the `
+			);
+			betaVersionInfo.createEl("a", {
+				text: "Beta Helper",
+				href: "https://github.com/oxdc/obsidian-vertical-tabs-beta-helper",
+				attr: { target: "_blank" },
+			});
+			betaVersionInfo.appendText(
+				` plugin. For more information, please refer to the `
+			);
+			betaVersionInfo.createEl("a", {
+				text: "Beta Program documentation",
+				href: "https://vertical-tabs-docs.oxdc.dev/Beta-Versions/beta-program",
+				attr: { target: "_blank" },
+			});
 		} else {
 			if (this.plugin.settings.enableUpdateCheck ?? true) {
 				const indicator = entry.controlEl.createDiv();
@@ -250,9 +311,11 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	}
 
 	private addReleaseNotesLink(entry: Setting, latestVersion: string) {
-		const releaseUrl = `https://github.com/oxdc/obsidian-vertical-tabs/releases/tag/${latestVersion}`;
-		const linkHtml = `<a href="${releaseUrl}" target="_blank" rel="noopener noreferrer">Release notes</a>`;
-		entry.descEl.createSpan().innerHTML = linkHtml;
+		entry.descEl.createSpan().createEl("a", {
+			text: "Release notes",
+			href: `https://github.com/oxdc/obsidian-vertical-tabs/releases/tag/${latestVersion}`,
+			attr: { target: "_blank", rel: "noopener noreferrer" },
+		});
 	}
 
 	private addPluginStoreButton(entry: Setting) {
@@ -308,18 +371,21 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	// Basic Settings
 
 	private displayBasicSettingsSection(containerEl: HTMLElement) {
-		this.displayCommonSettingsSection(containerEl);
+		const group = this.createSettingGroup(containerEl);
+		this.displayCommonSettingsSection(group);
 		if (Platform.isMobile) {
-			this.displayMobileSettingsSection(containerEl);
+			this.displayMobileSettingsSection(group);
 		}
 	}
 
-	private displayCommonSettingsSection(containerEl: HTMLElement) {
+	private displayCommonSettingsSection(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.displayVisualOptions(containerEl);
 		this.displayTabZoomOptions(containerEl);
 	}
 
-	private displayVisualOptions(containerEl: HTMLElement) {
+	private displayVisualOptions(containerEl: HTMLElement | SettingGroup) {
 		this.createToggle(containerEl, {
 			name: "Hide sidebar tabs",
 			desc: "Don't show sidebar tabs in Vertical Tabs.",
@@ -370,7 +436,7 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayTabZoomOptions(containerEl: HTMLElement) {
+	private displayTabZoomOptions(containerEl: HTMLElement | SettingGroup) {
 		this.createToggle(containerEl, {
 			name: "Enable tab zoom",
 			desc: "Enable per tab zooming.",
@@ -380,7 +446,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayMobileSettingsSection(containerEl: HTMLElement) {
+	private displayMobileSettingsSection(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createDropdown(containerEl, {
 			name: "Mobile action preference",
 			desc: this.plugin.settings.useTabEditing
@@ -405,20 +473,25 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	// Horizontal Tab Control
 
 	private displayHorizontalTabControlSection(containerEl: HTMLElement) {
-		new Setting(containerEl).setName("Horizontal tab control").setHeading();
+		const group = this.createSettingGroup(
+			containerEl,
+			"Horizontal tab control"
+		);
 
-		this.displayHorizontalTabsOptions(containerEl);
-		this.displayEnhancedKeyboardTabSwitchToggle(containerEl);
+		this.displayHorizontalTabsOptions(group);
+		this.displayEnhancedKeyboardTabSwitchToggle(group);
 
 		if (!this.plugin.settings.showActiveTabs) {
-			this.displayScrollableTabsToggle(containerEl);
+			this.displayScrollableTabsToggle(group);
 			if (this.plugin.settings.scrollableTabs) {
-				this.displayScrollableTabsOptions(containerEl);
+				this.displayScrollableTabsOptions(group);
 			}
 		}
 	}
 
-	private displayHorizontalTabsOptions(containerEl: HTMLElement) {
+	private displayHorizontalTabsOptions(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Show active tabs only",
 			desc: "Hide inactive horizontal tabs to make workspace cleaner.",
@@ -454,7 +527,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayEnhancedKeyboardTabSwitchToggle(containerEl: HTMLElement) {
+	private displayEnhancedKeyboardTabSwitchToggle(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Enhanced keyboard tab switching",
 			desc: "Use Ctrl/Cmd + 1-9 to switch between tabs.",
@@ -466,7 +541,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayScrollableTabsToggle(containerEl: HTMLElement) {
+	private displayScrollableTabsToggle(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Scrollable tabs",
 			desc: "Enable horizontal scrolling for tab headers when they exceed available width.",
@@ -478,7 +555,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayScrollableTabsOptions(containerEl: HTMLElement) {
+	private displayScrollableTabsOptions(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createSlider(containerEl, {
 			name: "Tab minimum width",
 			desc: "Minimum width of each tab header in pixels.",
@@ -495,9 +574,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	// Navigation Strategy
 
 	private displayNavigationStrategySection(containerEl: HTMLElement) {
-		new Setting(containerEl).setName("Tab navigation").setHeading();
+		const group = this.createSettingGroup(containerEl, "Tab navigation");
 
-		this.createDropdown(containerEl, {
+		this.createDropdown(group, {
 			name: "Navigation strategy",
 			desc: "Controls the navigation behavior when new notes are opened.",
 			options: TabNavigationStrategyOptions,
@@ -510,9 +589,16 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 			TabNavigationStrategy.Custom;
 
 		if (isCustomStrategy) {
-			this.displayCustomNavigationStrategy(containerEl);
+			this.displayCustomNavigationStrategy(group);
 		} else {
-			containerEl.createDiv({
+			let descEl: HTMLElement = containerEl;
+			if (requireApiVersion("1.11.0")) {
+				const descriptionSetting = this.createSetting(group, (s) => s);
+				descEl = descriptionSetting.settingEl;
+				descEl.empty();
+			}
+
+			descEl.createDiv({
 				cls: "vt-navigation-description",
 				text: TabNavigationStrategyDescriptions[
 					this.plugin.settings.navigationStrategy
@@ -521,7 +607,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		}
 	}
 
-	private displayCustomNavigationStrategy(containerEl: HTMLElement) {
+	private displayCustomNavigationStrategy(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createDropdown(containerEl, {
 			name: "Copy from existing strategy",
 			options: TabNavigationCopyOptions,
@@ -545,7 +633,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		}
 	}
 
-	private displayAlwaysOpenInNewTabToggle(containerEl: HTMLElement) {
+	private displayAlwaysOpenInNewTabToggle(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Always open in new tab",
 			value: this.plugin.settings.alwaysOpenInNewTab,
@@ -558,7 +648,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displaySmartNavigationToggle(containerEl: HTMLElement) {
+	private displaySmartNavigationToggle(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Smart navigation",
 			desc: "Ensures consistent and intuitive behavior when working with multiple tab groups.",
@@ -568,7 +660,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayEphemeralTabsToggle(containerEl: HTMLElement) {
+	private displayEphemeralTabsToggle(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Enable ephemeral tabs",
 			desc: "Bring VSCode-like ephemeral tabs to Obsidian.",
@@ -577,7 +671,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayEphemeralTabsOptions(containerEl: HTMLElement) {
+	private displayEphemeralTabsOptions(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Auto close ephemeral tabs",
 			desc: "Close inactive ephemeral tabs automatically and merge their history.",
@@ -589,7 +685,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayDeduplicationToggle(containerEl: HTMLElement) {
+	private displayDeduplicationToggle(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Deduplicate tabs",
 			desc: "Prevent opening the same note in multiple tabs.",
@@ -598,7 +696,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayDeduplicationOptions(containerEl: HTMLElement) {
+	private displayDeduplicationOptions(
+		containerEl: HTMLElement | SettingGroup
+	) {
 		this.createToggle(containerEl, {
 			name: "Deduplicate only same-group tabs",
 			desc: "Perform deduplication only within the same tab group.",
@@ -697,9 +797,9 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	// Linked Folder
 
 	private displayLinkedFolderSection(parentEl: HTMLElement) {
-		new Setting(parentEl).setName("Linked folder").setHeading();
+		const group = this.createSettingGroup(parentEl, "Linked folder");
 
-		this.createDropdown(parentEl, {
+		this.createDropdown(group, {
 			name: "Load order",
 			desc: "Determines the order in which files are loaded, such as by name or date.",
 			options: linkedFolderSortStrategyOptions,
@@ -710,7 +810,7 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 				}),
 		});
 
-		this.createSlider(parentEl, {
+		this.createSlider(group, {
 			name: "Files per load",
 			desc: "Files loaded per click when opening a folder as a group.",
 			value: {
@@ -728,13 +828,13 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	// Group View
 
 	private displayGroupViewSection(parentEl: HTMLElement) {
-		new Setting(parentEl).setName("Group view").setHeading();
-		this.displayOptionsForContinuousView(parentEl);
-		this.displayOptionsForColumnView(parentEl);
-		this.displayOptionsForMissionControlView(parentEl);
+		const group = this.createSettingGroup(parentEl, "Group view");
+		this.displayOptionsForContinuousView(group);
+		this.displayOptionsForColumnView(group);
+		this.displayOptionsForMissionControlView(group);
 	}
 
-	private displayOptionsForContinuousView(parentEl: HTMLElement) {
+	private displayOptionsForContinuousView(parentEl: HTMLElement | SettingGroup) {
 		this.createToggle(parentEl, {
 			name: "Show metadata in continuous view",
 			value: this.plugin.settings.continuousViewShowMetadata,
@@ -754,7 +854,7 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayOptionsForColumnView(parentEl: HTMLElement) {
+	private displayOptionsForColumnView(parentEl: HTMLElement | SettingGroup) {
 		this.createSlider(parentEl, {
 			name: "Column view tab width",
 			desc: "Minimum width of each tab in the column view in pixels.",
@@ -770,7 +870,7 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 	}
 
-	private displayOptionsForMissionControlView(parentEl: HTMLElement) {
+	private displayOptionsForMissionControlView(parentEl: HTMLElement | SettingGroup) {
 		this.createSlider(parentEl, {
 			name: "Zoom factor in mission control view",
 			desc: "Adjust the page size in mission control view.",
@@ -799,11 +899,11 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	// Miscellaneous
 
 	private displayMiscellaneousSection(parentEl: HTMLElement) {
-		new Setting(parentEl).setName("Miscellaneous").setHeading();
+		const group = this.createSettingGroup(parentEl, "Miscellaneous");
 
 		const store = this.plugin.persistenceManager.device;
 		const disableOnThisDevice = store.get<boolean>(DISABLE_KEY);
-		this.createToggle(parentEl, {
+		this.createToggle(group, {
 			name: "Disable on this device",
 			desc: `Disable Vertical Tabs on this device only.
 						 The plugin will remain enabled on other devices.
@@ -812,7 +912,7 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 			onChange: (value) => this.toggleDisableOnThisDevice(value),
 		});
 
-		this.createToggle(parentEl, {
+		this.createToggle(group, {
 			name: "Background mode",
 			desc: `Enable to keep features like tab navigation without showing vertical tabs.
 					   This will disable Zen Mode and reset your workspace to the default layout.`,
@@ -820,7 +920,7 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 			onChange: (value) => this.toggleBackgroundMode(value),
 		});
 
-		this.createToggle(parentEl, {
+		this.createToggle(group, {
 			name: "Check for updates",
 			desc: "Automatically check for plugin updates when opening settings.",
 			value: this.plugin.settings.enableUpdateCheck ?? true,
@@ -860,26 +960,33 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 
 	private displayFeedbackContent(parentEl: HTMLElement) {
 		parentEl.createDiv({ cls: "title", text: "Enjoying Vertical Tabs?" });
-		parentEl.createDiv({ cls: "buttons" }).innerHTML = `
-			<a id="vt-support-btn-kofi" href="https://ko-fi.com/oxdcq" target="_blank">
-				<img
-					width="24"
-					border="0"
-					style="border: 0px; width: 24px; mix-blend-mode: multiply;"
-					src="https://storage.ko-fi.com/cdn/brandasset/v2/kofi_symbol.png"
-				/>
-				<span>Buy me a coffee</span>
-			</a>
-			<a id="vt-support-btn-github" href="https://github.com/oxdc/obsidian-vertical-tabs" target="_blank">
-				<img
-					width="24"
-					border="0"
-					style="border: 0px; width: 24px; mix-blend-mode: multiply;"
-					src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
-				/>
-				<span>Star on GitHub</span>
-			</a>
-		`;
+		const buttons = parentEl.createDiv({ cls: "buttons" });
+		const kofiButton = buttons.createEl("a", {
+			href: "https://ko-fi.com/oxdcq",
+			attr: { id: "vt-support-btn-kofi", target: "_blank" },
+		});
+		kofiButton.createEl("img", {
+			attr: {
+				src: "https://storage.ko-fi.com/cdn/brandasset/v2/kofi_symbol.png",
+				width: "24",
+				border: "0",
+				style: "border: 0px; width: 24px; mix-blend-mode: multiply;",
+			},
+		});
+		kofiButton.createEl("span", { text: "Buy me a coffee" });
+		const githubButton = buttons.createEl("a", {
+			href: "https://github.com/oxdc/obsidian-vertical-tabs",
+			attr: { id: "vt-support-btn-github", target: "_blank" },
+		});
+		githubButton.createEl("img", {
+			attr: {
+				src: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+				width: "24",
+				border: "0",
+				style: "border: 0px; width: 24px; mix-blend-mode: multiply;",
+			},
+		});
+		githubButton.createEl("span", { text: "Star on GitHub" });
 	}
 
 	private displayBugReport(parentEl: HTMLElement) {
