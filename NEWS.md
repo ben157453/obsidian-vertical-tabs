@@ -1,3 +1,25 @@
+# Vertical Tabs v0.16.6
+
+## 🎉 What's New:
+
+- **New commands** to bookmark the current tab group (#190).
+- **New option** to display the new tab button at the bottom of each group (#179).
+
+## ✅ Improvements:
+
+- Added support for Obsidian v1.11.0+ design updates.
+- **Automatic sidebar collapse:** The sidebar now automatically collapses on mobile devices and respects the collapsed state on tablet/desktop (#186 #193 #177).
+- **Visual feedback:** Hidden groups now display with reduced opacity for clearer visual distinction (#183).
+- Improved compatibility with Hover Editor and Excalidraw plugins (#187).
+
+## 🐛 Bug Fixes:
+
+- Resolved issue where accessing `parentSplit` would fail when `activeLeaf.parent` is detached.
+- Fixed tabs remaining incorrectly stacked when switching group view modes.
+- Corrected "Scrollable Tabs" styling inconsistencies (#189, #192).
+- Fixed installation ID redaction.
+
+---
 # Vertical Tabs v0.16.5
 
 ## 🎉 What's New:
