@@ -107,6 +107,11 @@ interface ViewState {
 	viewCueNativeCallbacks: ViewCueNativeCallbackMap;
 	viewCueFirstTabs: ViewCueFirstTabs;
 	fGroups: FGroups;
+	activeFGroupId: string | null;
+	toggleFGroup: (fGroupId: string) => void;
+	getAllFGroups: () => FGroup[];
+	switchToNextFGroup: () => void;
+	switchToPreviousFGroup: () => void;
 	setGroupTitle: (id: Identifier, name: string) => void;
 	toggleCollapsedGroup: (id: Identifier, isCollapsed: boolean) => void;
 	toggleHiddenGroup: (id: Identifier, isHidden: boolean) => void;
@@ -309,6 +314,7 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	viewCueNativeCallbacks: new Map(),
 	viewCueFirstTabs: createNewViewCueFirstTabs(),
 	fGroups: loadTabGroups(),
+	activeFGroupId: null,
 	linkedGroups: createNewLinkedGroups(),
 	leftButtonClone: null,
 	rightButtonClone: null,
@@ -915,44 +921,20 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		saveTabGroups(newFGroups);
 	},
 	addGroupToFGroup(groupId: string, fGroupId: string) {
-		const { fGroups, hiddenGroups } = get();
+		const { fGroups } = get();
 		const fGroup = fGroups[fGroupId];
 		if (!fGroup) return;
 		
+		if (fGroup.groupIds.includes(groupId)) return;
+		
 		const newFGroups = { ...fGroups };
-		
-		let existingFGroupId: string | null = null;
-		for (const id in fGroups) {
-			if (fGroups[id].groupIds.includes(groupId)) {
-				existingFGroupId = id;
-				break;
-			}
-		}
-		
-		if (existingFGroupId) {
-			const existingFGroup = fGroups[existingFGroupId];
-			const newGroupIds = existingFGroup.groupIds.filter((id) => id !== groupId);
-			
-			if (newGroupIds.length === 0) {
-				delete newFGroups[existingFGroupId];
-			} else {
-				newFGroups[existingFGroupId] = {
-					...existingFGroup,
-					groupIds: newGroupIds,
-				};
-			}
-		}
-		
 		newFGroups[fGroupId] = {
 			...fGroup,
 			groupIds: [...fGroup.groupIds, groupId],
 		};
 		
-		const newHiddenGroups = hiddenGroups.filter((id) => id !== groupId);
-		
-		set({ fGroups: newFGroups, hiddenGroups: newHiddenGroups });
+		set({ fGroups: newFGroups });
 		saveTabGroups(newFGroups);
-		saveHiddenGroups(newHiddenGroups);
 	},
 	removeGroupFromFGroup(groupId: string) {
 		const { fGroups, hiddenGroups } = get();
@@ -992,32 +974,15 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		saveTabGroups(newFGroups);
 	},
 	toggleFGroupVisibility(groupId: string, isHidden: boolean) {
-		const { fGroups, hiddenGroups } = get();
+		const { fGroups } = get();
 		const group = fGroups[groupId];
 		if (!group) return;
 		
 		const newFGroups = { ...fGroups };
 		newFGroups[groupId] = { ...group, isHidden };
 		
-		const newHiddenGroups = [...hiddenGroups];
-		if (isHidden) {
-			group.groupIds.forEach((id) => {
-				if (!newHiddenGroups.includes(id)) {
-					newHiddenGroups.push(id);
-				}
-			});
-		} else {
-			group.groupIds.forEach((id) => {
-				const index = newHiddenGroups.indexOf(id);
-				if (index !== -1) {
-					newHiddenGroups.splice(index, 1);
-				}
-			});
-		}
-		
-		set({ fGroups: newFGroups, hiddenGroups: newHiddenGroups });
+		set({ fGroups: newFGroups });
 		saveTabGroups(newFGroups);
-		saveHiddenGroups(newHiddenGroups);
 	},
 	getFGroup(groupId: string) {
 		const { fGroups } = get();
@@ -1031,5 +996,101 @@ export const useViewState = create<ViewState>()((set, get) => ({
 			}
 		}
 		return null;
+	},
+	toggleFGroup: (fGroupId: string) => {
+		const { fGroups, activeFGroupId } = get();
+		const targetFGroup = fGroups[fGroupId];
+		if (!targetFGroup) return;
+
+		// 计算所有FGroup中共享的子组ID
+		const groupIdCounts = new Map<string, number>();
+		for (const fgId in fGroups) {
+			const fg = fGroups[fgId];
+			fg.groupIds.forEach((groupId) => {
+				groupIdCounts.set(groupId, (groupIdCounts.get(groupId) || 0) + 1);
+			});
+		}
+		const sharedGroupIds = new Set<string>();
+		groupIdCounts.forEach((count, groupId) => {
+			if (count > 1) {
+				sharedGroupIds.add(groupId);
+			}
+		});
+
+		// 计算需要隐藏的组ID
+		const groupsToHide = new Set<string>();
+		for (const fgId in fGroups) {
+			if (fgId !== fGroupId) {
+				const fg = fGroups[fgId];
+				fg.groupIds.forEach((groupId) => {
+					// 只隐藏非共享的组
+					if (!sharedGroupIds.has(groupId)) {
+						groupsToHide.add(groupId);
+					}
+				});
+			}
+		}
+
+		// 计算需要显示的组ID
+		const groupsToShow = new Set<string>();
+		targetFGroup.groupIds.forEach((groupId) => {
+			groupsToShow.add(groupId);
+		});
+		// 添加所有共享组
+		sharedGroupIds.forEach((groupId) => {
+			groupsToShow.add(groupId);
+		});
+
+		// 更新隐藏组状态
+		let newHiddenGroups = [...get().hiddenGroups];
+		
+		// 先移除所有需要显示的组
+		newHiddenGroups = newHiddenGroups.filter((id) => !groupsToShow.has(id));
+		
+		// 再添加所有需要隐藏的组
+		groupsToHide.forEach((id) => {
+			if (!newHiddenGroups.includes(id)) {
+				newHiddenGroups.push(id);
+			}
+		});
+
+		// 更新状态
+		set({ 
+			activeFGroupId: fGroupId,
+			hiddenGroups: newHiddenGroups
+		});
+		
+		// 保存状态
+		saveHiddenGroups(newHiddenGroups);
+	},
+	getAllFGroups: () => {
+		const { fGroups } = get();
+		return Object.values(fGroups);
+	},
+	switchToNextFGroup: () => {
+		const { fGroups, activeFGroupId } = get();
+		const fGroupList = Object.values(fGroups);
+		if (fGroupList.length === 0) return;
+
+		let currentIndex = -1;
+		if (activeFGroupId) {
+			currentIndex = fGroupList.findIndex((fg) => fg.id === activeFGroupId);
+		}
+
+		const nextIndex = (currentIndex + 1) % fGroupList.length;
+		get().toggleFGroup(fGroupList[nextIndex].id);
+	},
+	switchToPreviousFGroup: () => {
+		const { fGroups, activeFGroupId } = get();
+		const fGroupList = Object.values(fGroups);
+		if (fGroupList.length === 0) return;
+
+		let currentIndex = -1;
+		if (activeFGroupId) {
+			currentIndex = fGroupList.findIndex((fg) => fg.id === activeFGroupId);
+		}
+
+		const prevIndex = currentIndex <= 0 ? fGroupList.length - 1 : currentIndex - 1;
+		get().toggleFGroup(fGroupList[prevIndex].id);
 	},
 }));

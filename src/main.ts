@@ -121,6 +121,22 @@ export default class ObsidianVerticalTabs extends Plugin {
 				useSettings.getState().toggleBackgroundMode(this.app, false);
 			},
 		});
+
+		this.addCommand({
+			id: "switch-to-next-fgroup",
+			name: "Switch to next FGroup",
+			callback: () => {
+				useViewState.getState().switchToNextFGroup();
+			},
+		});
+
+		this.addCommand({
+			id: "switch-to-previous-fgroup",
+			name: "Switch to previous FGroup",
+			callback: () => {
+				useViewState.getState().switchToPreviousFGroup();
+			},
+		});
 	}
 
 	async openVerticalTabs() {

@@ -97,13 +97,24 @@ export const FGroup = (props: FGroupProps) => {
 		renameFGroup,
 		toggleFGroupVisibility,
 		getFGroup,
+		toggleFGroup,
+		activeFGroupId,
 	} = useViewState();
 
 	const currentGroup = getFGroup(fGroup.id);
 	const isHidden = currentGroup?.isHidden ?? false;
+	const isActive = activeFGroupId === fGroup.id;
 
 	const toggleVisibility = () => {
 		toggleFGroupVisibility(fGroup.id, !isHidden);
+		workspace.trigger(EVENTS.UPDATE_TOGGLE);
+		setTimeout(() => {
+			autoResizeLayout(app);
+		}, REFRESH_TIMEOUT);
+	};
+
+	const handleClick = () => {
+		toggleFGroup(fGroup.id);
 		workspace.trigger(EVENTS.UPDATE_TOGGLE);
 		setTimeout(() => {
 			autoResizeLayout(app);
@@ -156,17 +167,18 @@ export const FGroup = (props: FGroupProps) => {
 			id={fGroup.id}
 			isTab={false}
 			title={fGroup.name}
-			onClick={onToggleCollapse}
+			onClick={handleClick}
 			dataType="fgroup"
 			toolbar={menuItems}
 			icon="folder"
 			isCollapsed={isCollapsed}
 			isSidebar={false}
 			isSingleGroup={false}
-			isActiveGroup={false}
+			isActiveGroup={isActive}
 			classNames={{
 				"is-hidden": isHidden,
 				"is-fgroup": true,
+				"is-active": isActive,
 			}}
 		>
 			{!isCollapsed && children}
