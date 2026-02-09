@@ -5,7 +5,7 @@ import { DEFAULT_GROUP_TITLE, useViewState } from "src/models/ViewState";
 import { useApp, useSettings } from "src/models/PluginContext";
 import { GroupType } from "src/models/VTWorkspace";
 import { moveTabToEnd } from "src/services/MoveTab";
-import { Menu, WorkspaceParent } from "obsidian";
+import { App, Menu, Modal, WorkspaceParent } from "obsidian";
 import { EVENTS } from "src/constants/Events";
 import {
 	createBookmarkForGroup,
@@ -57,6 +57,9 @@ export const Group = (props: GroupProps) => {
 		bindGroupViewToggleEvent,
 		getLinkedFolder,
 		removeLinkedGroup,
+		createFGroup,
+		addGroupToFGroup,
+		removeGroupFromFGroup,
 	} = useViewState();
 
 	/* Relevant settings */
@@ -249,6 +252,62 @@ export const Group = (props: GroupProps) => {
 				setGroupViewType(group, GroupViewType.MissionControlView)
 			);
 	});
+	// FGroup management
+	if (!isSidebar && group) {
+		menu.addSeparator();
+		menu.addItem((item) => {
+			item.setSection("control")
+				.setTitle("Create fgroup")
+				.onClick(() => {
+					if (!group) return;
+					new FGroupNameModal(app, (name) => {
+						createFGroup(name, [group.id]);
+					}).open();
+				});
+		});
+		menu.addItem((item) => {
+			item.setSection("control")
+				.setTitle("Add to fgroup")
+				.onClick(() => {
+					if (!group) return;
+					const { fGroups } = useViewState.getState();
+					const fGroupOptions = Object.values(fGroups).map(
+						(fGroup) => fGroup.name
+					);
+					if (fGroupOptions.length === 0) {
+						new FGroupSelectModal(app, fGroupOptions, (fGroupName) => {
+							if (fGroupName) {
+								const targetFGroup = Object.values(fGroups).find(
+									(fGroup) => fGroup.name === fGroupName
+								);
+								if (targetFGroup) {
+									addGroupToFGroup(group.id, targetFGroup.id);
+								}
+							}
+						}).open();
+						return;
+					}
+					new FGroupSelectModal(app, fGroupOptions, (fGroupName) => {
+						if (fGroupName) {
+							const targetFGroup = Object.values(fGroups).find(
+								(fGroup) => fGroup.name === fGroupName
+							);
+							if (targetFGroup) {
+								addGroupToFGroup(group.id, targetFGroup.id);
+							}
+						}
+					}).open();
+				});
+		});
+		menu.addItem((item) => {
+			item.setSection("control")
+				.setTitle("Remove from fgroup")
+				.onClick(() => {
+					if (!group) return;
+					removeGroupFromFGroup(group.id);
+				});
+		});
+	}
 	// Tab control
 	menu.addSeparator();
 	menu.addItem((item) => {
@@ -428,3 +487,147 @@ export const Group = (props: GroupProps) => {
 		</NavigationTreeItem>
 	);
 };
+
+class FGroupNameModal extends Modal {
+	private onSubmit: (name: string) => void;
+	private inputEl: HTMLInputElement | null = null;
+
+	constructor(app: App, onSubmit: (name: string) => void) {
+		super(app);
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "Create FGroup" });
+
+		const inputContainer = contentEl.createDiv();
+		this.inputEl = inputContainer.createEl("input", {
+			type: "text",
+			placeholder: "Enter fgroup name",
+			value: "New FGroup",
+		});
+		this.inputEl.style.width = "100%";
+		this.inputEl.style.padding = "8px";
+		this.inputEl.style.marginBottom = "16px";
+		this.inputEl.style.fontSize = "14px";
+
+		const buttonContainer = contentEl.createDiv({
+			cls: "modal-button-container",
+		});
+
+		const submitButton = buttonContainer.createEl("button", {
+			cls: "mod-cta",
+			text: "Create",
+		});
+		submitButton.onclick = () => {
+			const name = this.inputEl?.value?.trim();
+			if (name) {
+				this.onSubmit(name);
+				this.close();
+			}
+		};
+
+		const cancelButton = buttonContainer.createEl("button", {
+			text: "Cancel",
+		});
+		cancelButton.onclick = () => {
+			this.close();
+		};
+
+		setTimeout(() => {
+			if (this.inputEl) {
+				this.inputEl.focus();
+				this.inputEl.select();
+			}
+		}, 100);
+
+		this.inputEl?.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				const name = this.inputEl?.value?.trim();
+				if (name) {
+					this.onSubmit(name);
+					this.close();
+				}
+			} else if (e.key === "Escape") {
+				this.close();
+			}
+		});
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
+class FGroupSelectModal extends Modal {
+	private onSubmit: (fGroupName: string | null) => void;
+	private fGroupOptions: string[];
+
+	constructor(
+		app: App,
+		fGroupOptions: string[],
+		onSubmit: (fGroupName: string | null) => void
+	) {
+		super(app);
+		this.fGroupOptions = fGroupOptions;
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "Select FGroup" });
+
+		if (this.fGroupOptions.length === 0) {
+			const message = contentEl.createDiv();
+			message.style.padding = "16px";
+			message.style.textAlign = "center";
+			message.textContent = "No fgroups available. Create one first.";
+		}
+
+		const selectContainer = contentEl.createDiv();
+		selectContainer.style.padding = "16px";
+
+		const select = selectContainer.createEl("select", {
+			cls: "dropdown",
+		});
+		select.style.width = "100%";
+		select.style.padding = "8px";
+		select.style.fontSize = "14px";
+
+		this.fGroupOptions.forEach((fGroupName) => {
+			select.createEl("option", {
+				value: fGroupName,
+				text: fGroupName,
+			});
+		});
+
+		const buttonContainer = contentEl.createDiv({
+			cls: "modal-button-container",
+		});
+
+		const submitButton = buttonContainer.createEl("button", {
+			cls: "mod-cta",
+			text: "OK",
+		});
+		submitButton.onclick = () => {
+			const selectedFGroup = (select as HTMLSelectElement).value;
+			this.onSubmit(selectedFGroup);
+			this.close();
+		};
+
+		const cancelButton = buttonContainer.createEl("button", {
+			text: "Cancel",
+		});
+		cancelButton.onclick = () => {
+			this.onSubmit(null);
+			this.close();
+		};
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}

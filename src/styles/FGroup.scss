@@ -1,0 +1,42 @@
+.vt-tree-item.is-fgroup {
+	.tree-item-self {
+		font-weight: 600;
+		background-color: var(--background-secondary);
+		border-left: 3px solid var(--interactive-accent);
+		margin-bottom: 4px;
+	}
+
+	.tree-item-children {
+		margin-left: 12px;
+		border-left: 1px solid var(--background-modifier-border);
+		padding-left: 8px;
+	}
+
+	&.is-hidden {
+		.tree-item-self {
+			opacity: 0.6;
+			background-color: var(--background-modifier-error);
+			border-left-color: var(--text-error);
+		}
+
+		.tree-item-children {
+			display: none;
+		}
+	}
+
+	&.is-collapsed {
+		.tree-item-children {
+			display: none;
+		}
+	}
+}
+
+.vt-tree-item.is-fgroup .vt-icon-button {
+	&:first-child {
+		margin-right: 4px;
+	}
+}
+
+.vt-tree-item.is-fgroup .vt-tree-item-title {
+	flex: 1;
+}

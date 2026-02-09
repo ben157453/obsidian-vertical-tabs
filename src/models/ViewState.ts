@@ -64,6 +64,16 @@ export type LinkedGroups = DefaultRecord<Identifier, LinkedFolder | null>;
 export const createNewLinkedGroups = () =>
 	new DefaultRecord(() => null) as LinkedGroups;
 
+export interface FGroup {
+	id: string;
+	name: string;
+	groupIds: string[];
+	isHidden: boolean;
+}
+
+export type FGroups = Record<string, FGroup>;
+export const createNewFGroups = (): FGroups => ({});
+
 export type ViewCueIndex = number | string | undefined;
 export const MIN_INDEX_KEY = 1;
 export const MAX_INDEX_KEY = 8;
@@ -96,6 +106,7 @@ interface ViewState {
 	viewCueOffset: number;
 	viewCueNativeCallbacks: ViewCueNativeCallbackMap;
 	viewCueFirstTabs: ViewCueFirstTabs;
+	fGroups: FGroups;
 	setGroupTitle: (id: Identifier, name: string) => void;
 	toggleCollapsedGroup: (id: Identifier, isCollapsed: boolean) => void;
 	toggleHiddenGroup: (id: Identifier, isHidden: boolean) => void;
@@ -181,6 +192,14 @@ interface ViewState {
 	isLinkedGroup: (groupID: Identifier) => boolean;
 	setGroupViewTypeForCurrentGroup: (viewType: GroupViewType) => void;
 	exitMissionControlForCurrentGroup: () => void;
+	createFGroup: (name: string, groupIds: string[]) => string;
+	renameFGroup: (groupId: string, newName: string) => void;
+	addGroupToFGroup: (groupId: string, fGroupId: string) => void;
+	removeGroupFromFGroup: (groupId: string) => void;
+	deleteFGroup: (groupId: string) => void;
+	toggleFGroupVisibility: (groupId: string, isHidden: boolean) => void;
+	getFGroup: (groupId: string) => FGroup | null;
+	getGroupByTabId: (tabId: string) => FGroup | null;
 }
 
 const saveViewState = (titles: GroupTitles) => {
@@ -227,6 +246,16 @@ const loadNonEphemeralTabs = (): Array<Identifier> => {
 
 const clearNonEphemeralTabs = () => {
 	localStorage.removeItem("nonephemeral-tabs");
+};
+
+const saveTabGroups = (tabGroups: FGroups) => {
+	localStorage.setItem("tab-groups", JSON.stringify(tabGroups));
+};
+
+const loadTabGroups = (): FGroups => {
+	const data = localStorage.getItem("tab-groups");
+	if (!data) return createNewFGroups();
+	return JSON.parse(data);
 };
 
 const getCornerContainers = (tabContainers: Array<Element>) => {
@@ -279,6 +308,7 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	viewCueOffset: 0,
 	viewCueNativeCallbacks: new Map(),
 	viewCueFirstTabs: createNewViewCueFirstTabs(),
+	fGroups: loadTabGroups(),
 	linkedGroups: createNewLinkedGroups(),
 	leftButtonClone: null,
 	rightButtonClone: null,
@@ -861,5 +891,145 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		if (viewType === GroupViewType.MissionControlView) {
 			setGroupViewType(group, GroupViewType.Default);
 		}
+	},
+	createFGroup(name: string, groupIds: string[]) {
+		const { fGroups } = get();
+		const newGroup: FGroup = {
+			id: `fgroup-${Date.now()}`,
+			name,
+			groupIds,
+			isHidden: false,
+		};
+		const newFGroups = { ...fGroups, [newGroup.id]: newGroup };
+		set({ fGroups: newFGroups });
+		saveTabGroups(newFGroups);
+		return newGroup.id;
+	},
+	renameFGroup(groupId: string, newName: string) {
+		const { fGroups } = get();
+		const group = fGroups[groupId];
+		if (!group) return;
+		const newFGroups = { ...fGroups };
+		newFGroups[groupId] = { ...group, name: newName };
+		set({ fGroups: newFGroups });
+		saveTabGroups(newFGroups);
+	},
+	addGroupToFGroup(groupId: string, fGroupId: string) {
+		const { fGroups, hiddenGroups } = get();
+		const fGroup = fGroups[fGroupId];
+		if (!fGroup) return;
+		
+		const newFGroups = { ...fGroups };
+		
+		let existingFGroupId: string | null = null;
+		for (const id in fGroups) {
+			if (fGroups[id].groupIds.includes(groupId)) {
+				existingFGroupId = id;
+				break;
+			}
+		}
+		
+		if (existingFGroupId) {
+			const existingFGroup = fGroups[existingFGroupId];
+			const newGroupIds = existingFGroup.groupIds.filter((id) => id !== groupId);
+			
+			if (newGroupIds.length === 0) {
+				delete newFGroups[existingFGroupId];
+			} else {
+				newFGroups[existingFGroupId] = {
+					...existingFGroup,
+					groupIds: newGroupIds,
+				};
+			}
+		}
+		
+		newFGroups[fGroupId] = {
+			...fGroup,
+			groupIds: [...fGroup.groupIds, groupId],
+		};
+		
+		const newHiddenGroups = hiddenGroups.filter((id) => id !== groupId);
+		
+		set({ fGroups: newFGroups, hiddenGroups: newHiddenGroups });
+		saveTabGroups(newFGroups);
+		saveHiddenGroups(newHiddenGroups);
+	},
+	removeGroupFromFGroup(groupId: string) {
+		const { fGroups, hiddenGroups } = get();
+		let targetFGroupId: string | null = null;
+		
+		for (const fGroupId in fGroups) {
+			if (fGroups[fGroupId].groupIds.includes(groupId)) {
+				targetFGroupId = fGroupId;
+				break;
+			}
+		}
+		
+		if (!targetFGroupId) return;
+		
+		const fGroup = fGroups[targetFGroupId];
+		const newGroupIds = fGroup.groupIds.filter((id) => id !== groupId);
+		
+		if (newGroupIds.length === 0) {
+			delete fGroups[targetFGroupId];
+			set({ fGroups: { ...fGroups } });
+			saveTabGroups(fGroups);
+		} else {
+			const newFGroups = { ...fGroups };
+			newFGroups[targetFGroupId] = {
+				...fGroup,
+				groupIds: newGroupIds,
+			};
+			set({ fGroups: newFGroups });
+			saveTabGroups(newFGroups);
+		}
+	},
+	deleteFGroup(groupId: string) {
+		const { fGroups } = get();
+		const newFGroups = { ...fGroups };
+		delete newFGroups[groupId];
+		set({ fGroups: newFGroups });
+		saveTabGroups(newFGroups);
+	},
+	toggleFGroupVisibility(groupId: string, isHidden: boolean) {
+		const { fGroups, hiddenGroups } = get();
+		const group = fGroups[groupId];
+		if (!group) return;
+		
+		const newFGroups = { ...fGroups };
+		newFGroups[groupId] = { ...group, isHidden };
+		
+		const newHiddenGroups = [...hiddenGroups];
+		if (isHidden) {
+			group.groupIds.forEach((id) => {
+				if (!newHiddenGroups.includes(id)) {
+					newHiddenGroups.push(id);
+				}
+			});
+		} else {
+			group.groupIds.forEach((id) => {
+				const index = newHiddenGroups.indexOf(id);
+				if (index !== -1) {
+					newHiddenGroups.splice(index, 1);
+				}
+			});
+		}
+		
+		set({ fGroups: newFGroups, hiddenGroups: newHiddenGroups });
+		saveTabGroups(newFGroups);
+		saveHiddenGroups(newHiddenGroups);
+	},
+	getFGroup(groupId: string) {
+		const { fGroups } = get();
+		return fGroups[groupId] || null;
+	},
+	getGroupByTabId(tabId: string) {
+		const { fGroups } = get();
+		for (const fGroupId in fGroups) {
+			if (fGroups[fGroupId].groupIds.includes(tabId)) {
+				return fGroups[fGroupId];
+			}
+		}
+		return null;
 	},
 }));
