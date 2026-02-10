@@ -64,11 +64,19 @@ export const NavigationContent = () => {
 		const overID = over.id as Identifier;
 		const isActiveTab = (active.data.current as any).isTab;
 		const isOverTab = (over.data.current as any).isTab;
+		const isOverFGroup = (over.data.current as any).isFGroup;
+		const isCtrlPressed = (event.activatorEvent as MouseEvent)?.ctrlKey || (event.activatorEvent as MouseEvent)?.metaKey;
 
 		if (isActiveTab) {
 			let movedTab: WorkspaceLeaf | null = null;
 			if (isOverTab) {
 				movedTab = moveTab(app, activeID, overID);
+			} else if (isOverFGroup) {
+				const fGroup = fGroups[overID];
+				if (fGroup && fGroup.groupIds.length > 0) {
+					const parent = content.get(fGroup.groupIds[0]).group;
+					if (parent) movedTab = moveTabToEnd(app, activeID, parent);
+				}
 			} else {
 				const groupID = overID.startsWith("slot")
 					? overID.slice(5)
@@ -88,6 +96,27 @@ export const NavigationContent = () => {
 				const leaf = app.workspace.getLeafById(overID);
 				if (!leaf) return;
 				swapGroup(activeID, leaf.parent.id);
+			} else if (isOverFGroup) {
+				const { addGroupToFGroup, removeGroupFromFGroup } = useViewState.getState();
+				const fGroup = fGroups[overID];
+				if (!fGroup) return;
+				
+				if (isCtrlPressed) {
+					addGroupToFGroup(activeID, overID);
+				} else {
+					const containingFGroups = Object.values(fGroups).filter(
+						(fg) => fg.groupIds.includes(activeID)
+					);
+					
+					if (containingFGroups.length === 0) {
+						addGroupToFGroup(activeID, overID);
+					} else if (!containingFGroups.find((fg) => fg.id === overID)) {
+						containingFGroups.forEach((fg) => {
+							removeGroupFromFGroup(activeID, fg.id);
+						});
+						addGroupToFGroup(activeID, overID);
+					}
+				}
 			} else {
 				if (overID === "slot-new") {
 					moveGroupToEnd(activeID);

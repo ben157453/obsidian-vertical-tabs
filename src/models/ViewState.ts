@@ -11,7 +11,6 @@ import {
 	WorkspaceParent,
 } from "obsidian";
 import ObsidianVerticalTabs from "src/main";
-import { useSettings } from "src/models/PluginContext";
 import {
 	getFrameStyle,
 	hasControlButtonsOnTheLeft,
@@ -207,37 +206,39 @@ interface ViewState {
 	getFGroup: (groupId: string) => FGroup | null;
 	getGroupByTabId: (tabId: string) => FGroup | null;
 	restoreWorkspaceState: (state: any) => void;
+	copyFGroupMembership: (sourceGroupId: string, targetGroupId: string) => void;
 }
 
 const saveViewState = (titles: GroupTitles) => {
 	const data = Array.from(titles.entries());
-	useSettings.getState().setSettings({ groupTitles: data });
+	localStorage.setItem("view-state", JSON.stringify(data));
 };
 
 const loadViewState = (): GroupTitles | null => {
-	const data = useSettings.getState().groupTitles;
+	const data = localStorage.getItem("view-state");
 	if (!data) return null;
-	return new DefaultRecord(factory, data);
+	const entries = JSON.parse(data) as [Identifier, string][];
+	return new DefaultRecord(factory, entries);
 };
 
 const saveHiddenGroups = (hiddenGroups: Array<Identifier>) => {
-	useSettings.getState().setSettings({ hiddenGroups });
+	localStorage.setItem("hidden-groups", JSON.stringify(hiddenGroups));
 };
 
 const loadHiddenGroups = (): Array<Identifier> => {
-	const data = useSettings.getState().hiddenGroups;
+	const data = localStorage.getItem("hidden-groups");
 	if (!data) return [];
-	return data;
+	return JSON.parse(data);
 };
 
 const saveCollapsedGroups = (collapsedGroups: Array<Identifier>) => {
-	useSettings.getState().setSettings({ collapsedGroups });
+	localStorage.setItem("collapsed-groups", JSON.stringify(collapsedGroups));
 };
 
 const loadCollapsedGroups = (): Array<Identifier> => {
-	const data = useSettings.getState().collapsedGroups;
+	const data = localStorage.getItem("collapsed-groups");
 	if (!data) return [];
-	return data;
+	return JSON.parse(data);
 };
 
 const saveNonEphemeralTabs = (tabs: Array<Identifier>) => {
@@ -255,13 +256,13 @@ const clearNonEphemeralTabs = () => {
 };
 
 const saveTabGroups = (tabGroups: FGroups) => {
-	useSettings.getState().setSettings({ fGroups: tabGroups });
+	localStorage.setItem("tab-groups", JSON.stringify(tabGroups));
 };
 
 const loadTabGroups = (): FGroups => {
-	const data = useSettings.getState().fGroups;
+	const data = localStorage.getItem("tab-groups");
 	if (!data) return createNewFGroups();
-	return data;
+	return JSON.parse(data);
 };
 
 const getCornerContainers = (tabContainers: Array<Element>) => {
@@ -1132,5 +1133,25 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		saveHiddenGroups(state.hiddenGroups || []);
 		saveCollapsedGroups(state.collapsedGroups || []);
 		saveViewState(state.groupTitles || createNewGroupTitles());
+	},
+	copyFGroupMembership: (sourceGroupId: string, targetGroupId: string) => {
+		if (!sourceGroupId || !targetGroupId) return;
+		
+		const { fGroups } = get();
+		const containingFGroups = Object.values(fGroups).filter(
+			(fGroup) => fGroup.groupIds.includes(sourceGroupId)
+		);
+		
+		containingFGroups.forEach((fGroup) => {
+			if (!fGroup.groupIds.includes(targetGroupId)) {
+				const newFGroups = { ...fGroups };
+				newFGroups[fGroup.id] = {
+					...fGroup,
+					groupIds: [...fGroup.groupIds, targetGroupId],
+				};
+				set({ fGroups: newFGroups });
+				saveTabGroups(newFGroups);
+			}
+		});
 	},
 }));

@@ -37,6 +37,7 @@ import { getDrawer } from "src/services/MobileDrawer";
 import { addMenuItemsToFolderContextMenu } from "src/services/OpenFolder";
 import { GroupViewType } from "src/models/VTGroupView";
 import { createBookmarkForGroup } from "src/models/VTBookmark";
+import { updateAllFGroupLabels } from "src/services/FGroupLabels";
 
 export const NavigationContainer = () => {
 	const plugin = usePlugin();
@@ -68,6 +69,8 @@ export const NavigationContainer = () => {
 
 	// Alt key timeout reference to allow cancellation
 	const altKeyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+	// Reference to track previous group IDs for detecting new groups
+	const previousGroupIdsRef = useRef<string[]>([]);
 
 	// Helper function to detect if drag target is a tab
 	const isLeafDragTarget = (target: Element): boolean => {
@@ -79,6 +82,83 @@ export const NavigationContainer = () => {
 			target.classList.contains("workspace-tab") ||
 			target.classList.contains("vt-tab-handle")
 		);
+	};
+
+	// Helper function to get all workspace group IDs
+	const getAllGroupIds = () => {
+		const groups = new Set<string>();
+		const iterateGroups = (parent: any) => {
+			if (parent.children) {
+				parent.children.forEach((child: any) => {
+					if (child.children) {
+						groups.add(child.id);
+						iterateGroups(child);
+					}
+				});
+			}
+		};
+		iterateGroups(app.workspace.rootSplit);
+		return Array.from(groups);
+	};
+
+	// Helper function to find a group by ID
+	const findGroupById = (root: any, groupId: string): any => {
+		if (!root) return null;
+		if (root.id === groupId) return root;
+		if (root.children) {
+			for (const child of root.children) {
+				const found = findGroupById(child, groupId);
+				if (found) return found;
+			}
+		}
+		return null;
+	};
+
+	// Helper function to find the source group for a new split group
+	const findSourceGroupForNewGroup = (newGroupId: string) => {
+		const newGroup = findGroupById(app.workspace.rootSplit, newGroupId);
+		if (!newGroup || !newGroup.children || newGroup.children.length === 0) return null;
+
+		// Find the most recently active leaf in the new group
+		let mostRecentLeaf: any = null;
+		let mostRecentTime = 0;
+
+		newGroup.children.forEach((leaf: any) => {
+			if (leaf.activeTime > mostRecentTime) {
+				mostRecentTime = leaf.activeTime;
+				mostRecentLeaf = leaf;
+			}
+		});
+
+		if (!mostRecentLeaf) return null;
+
+		// Find the active leaf before this one was created
+		// This is a simplified approach - we'll look for the most recently active leaf
+		// that's not in the new group
+		let sourceLeaf: any = null;
+		let sourceTime = 0;
+
+		const iterateLeaves = (root: any) => {
+			if (!root) return;
+			if (root.children) {
+				for (const child of root.children) {
+					if (child.children) {
+						iterateLeaves(child);
+					} else if (child.activeTime && child.id !== mostRecentLeaf.id) {
+						if (child.activeTime > sourceTime && child.activeTime < mostRecentTime) {
+							sourceTime = child.activeTime;
+							sourceLeaf = child;
+						}
+					}
+				}
+			}
+		};
+
+		iterateLeaves(app.workspace.rootSplit);
+
+		if (!sourceLeaf || !sourceLeaf.parent) return null;
+
+		return sourceLeaf.parent;
 	};
 
 	const handleDragStart = (e: DragEvent) => {
@@ -120,6 +200,28 @@ export const NavigationContainer = () => {
 				refresh(app);
 				sort();
 			}
+			updateAllFGroupLabels(app);
+
+			// Detect new groups created by splitting and copy FGroup membership
+			const currentGroupIds = getAllGroupIds();
+			const previousGroupIds = previousGroupIdsRef.current;
+			const newGroupIds = currentGroupIds.filter(id => !previousGroupIds.includes(id));
+
+			if (newGroupIds.length > 0) {
+				const { copyFGroupMembership } = useViewState.getState();
+				newGroupIds.forEach(newGroupId => {
+					const sourceGroup = findSourceGroupForNewGroup(newGroupId);
+					if (sourceGroup) {
+						copyFGroupMembership(sourceGroup.id, newGroupId);
+						console.log(`[VerticalTabs] Copied FGroup membership from ${sourceGroup.id} to new group ${newGroupId}`);
+					}
+				});
+				// Update FGroup labels for the new groups
+				updateAllFGroupLabels(app);
+			}
+
+			// Update previous group IDs for next comparison
+			previousGroupIdsRef.current = currentGroupIds;
 		});
 	};
 

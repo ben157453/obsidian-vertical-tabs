@@ -51,7 +51,10 @@ export const NavigationTreeItem = (props: NavigationTreeItemProps) => {
 	const { attributes, listeners, setNodeRef, isDragging, isOver } =
 		useSortable({
 			id: props.id ?? "",
-			data: { isTab: props.isTab && !props.isTabSlot },
+			data: { 
+				isTab: props.isTab && !props.isTabSlot,
+				isFGroup: props.dataType === "fgroup",
+			},
 			disabled: !props.id || props.isTabSlot || props.isGroupSlot,
 		});
 
