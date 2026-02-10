@@ -11,6 +11,7 @@ import {
 	WorkspaceParent,
 } from "obsidian";
 import ObsidianVerticalTabs from "src/main";
+import { useSettings } from "src/models/PluginContext";
 import {
 	getFrameStyle,
 	hasControlButtonsOnTheLeft,
@@ -200,43 +201,43 @@ interface ViewState {
 	createFGroup: (name: string, groupIds: string[]) => string;
 	renameFGroup: (groupId: string, newName: string) => void;
 	addGroupToFGroup: (groupId: string, fGroupId: string) => void;
-	removeGroupFromFGroup: (groupId: string) => void;
+	removeGroupFromFGroup: (groupId: string, fGroupId?: string) => void;
 	deleteFGroup: (groupId: string) => void;
 	toggleFGroupVisibility: (groupId: string, isHidden: boolean) => void;
 	getFGroup: (groupId: string) => FGroup | null;
 	getGroupByTabId: (tabId: string) => FGroup | null;
+	restoreWorkspaceState: (state: any) => void;
 }
 
 const saveViewState = (titles: GroupTitles) => {
 	const data = Array.from(titles.entries());
-	localStorage.setItem("view-state", JSON.stringify(data));
+	useSettings.getState().setSettings({ groupTitles: data });
 };
 
 const loadViewState = (): GroupTitles | null => {
-	const data = localStorage.getItem("view-state");
+	const data = useSettings.getState().groupTitles;
 	if (!data) return null;
-	const entries = JSON.parse(data) as [Identifier, string][];
-	return new DefaultRecord(factory, entries);
+	return new DefaultRecord(factory, data);
 };
 
 const saveHiddenGroups = (hiddenGroups: Array<Identifier>) => {
-	localStorage.setItem("hidden-groups", JSON.stringify(hiddenGroups));
+	useSettings.getState().setSettings({ hiddenGroups });
 };
 
 const loadHiddenGroups = (): Array<Identifier> => {
-	const data = localStorage.getItem("hidden-groups");
+	const data = useSettings.getState().hiddenGroups;
 	if (!data) return [];
-	return JSON.parse(data);
+	return data;
 };
 
 const saveCollapsedGroups = (collapsedGroups: Array<Identifier>) => {
-	localStorage.setItem("collapsed-groups", JSON.stringify(collapsedGroups));
+	useSettings.getState().setSettings({ collapsedGroups });
 };
 
 const loadCollapsedGroups = (): Array<Identifier> => {
-	const data = localStorage.getItem("collapsed-groups");
+	const data = useSettings.getState().collapsedGroups;
 	if (!data) return [];
-	return JSON.parse(data);
+	return data;
 };
 
 const saveNonEphemeralTabs = (tabs: Array<Identifier>) => {
@@ -254,13 +255,13 @@ const clearNonEphemeralTabs = () => {
 };
 
 const saveTabGroups = (tabGroups: FGroups) => {
-	localStorage.setItem("tab-groups", JSON.stringify(tabGroups));
+	useSettings.getState().setSettings({ fGroups: tabGroups });
 };
 
 const loadTabGroups = (): FGroups => {
-	const data = localStorage.getItem("tab-groups");
+	const data = useSettings.getState().fGroups;
 	if (!data) return createNewFGroups();
-	return JSON.parse(data);
+	return data;
 };
 
 const getCornerContainers = (tabContainers: Array<Element>) => {
@@ -936,34 +937,57 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		set({ fGroups: newFGroups });
 		saveTabGroups(newFGroups);
 	},
-	removeGroupFromFGroup(groupId: string) {
-		const { fGroups, hiddenGroups } = get();
-		let targetFGroupId: string | null = null;
+	removeGroupFromFGroup(groupId: string, fGroupId?: string) {
+		const { fGroups } = get();
 		
-		for (const fGroupId in fGroups) {
-			if (fGroups[fGroupId].groupIds.includes(groupId)) {
-				targetFGroupId = fGroupId;
-				break;
+		if (fGroupId) {
+			const fGroup = fGroups[fGroupId];
+			if (!fGroup) return;
+			
+			const newGroupIds = fGroup.groupIds.filter((id) => id !== groupId);
+			
+			if (newGroupIds.length === 0) {
+				const newFGroups = { ...fGroups };
+				delete newFGroups[fGroupId];
+				set({ fGroups: newFGroups });
+				saveTabGroups(newFGroups);
+			} else {
+				const newFGroups = { ...fGroups };
+				newFGroups[fGroupId] = {
+					...fGroup,
+					groupIds: newGroupIds,
+				};
+				set({ fGroups: newFGroups });
+				saveTabGroups(newFGroups);
 			}
-		}
-		
-		if (!targetFGroupId) return;
-		
-		const fGroup = fGroups[targetFGroupId];
-		const newGroupIds = fGroup.groupIds.filter((id) => id !== groupId);
-		
-		if (newGroupIds.length === 0) {
-			delete fGroups[targetFGroupId];
-			set({ fGroups: { ...fGroups } });
-			saveTabGroups(fGroups);
 		} else {
-			const newFGroups = { ...fGroups };
-			newFGroups[targetFGroupId] = {
-				...fGroup,
-				groupIds: newGroupIds,
-			};
-			set({ fGroups: newFGroups });
-			saveTabGroups(newFGroups);
+			const containingFGroupIds: string[] = [];
+			for (const fgId in fGroups) {
+				if (fGroups[fgId].groupIds.includes(groupId)) {
+					containingFGroupIds.push(fgId);
+				}
+			}
+			
+			if (containingFGroupIds.length === 0) return;
+			
+			const targetFGroupId = containingFGroupIds[0];
+			const fGroup = fGroups[targetFGroupId];
+			const newGroupIds = fGroup.groupIds.filter((id) => id !== groupId);
+			
+			if (newGroupIds.length === 0) {
+				const newFGroups = { ...fGroups };
+				delete newFGroups[targetFGroupId];
+				set({ fGroups: newFGroups });
+				saveTabGroups(newFGroups);
+			} else {
+				const newFGroups = { ...fGroups };
+				newFGroups[targetFGroupId] = {
+					...fGroup,
+					groupIds: newGroupIds,
+				};
+				set({ fGroups: newFGroups });
+				saveTabGroups(newFGroups);
+			}
 		}
 	},
 	deleteFGroup(groupId: string) {
@@ -1092,5 +1116,21 @@ export const useViewState = create<ViewState>()((set, get) => ({
 
 		const prevIndex = currentIndex <= 0 ? fGroupList.length - 1 : currentIndex - 1;
 		get().toggleFGroup(fGroupList[prevIndex].id);
+	},
+	restoreWorkspaceState: (state: any) => {
+		if (!state) return;
+		
+		set({
+			fGroups: state.fGroups || {},
+			activeFGroupId: state.activeFGroupId || null,
+			hiddenGroups: state.hiddenGroups || [],
+			collapsedGroups: state.collapsedGroups || [],
+			groupTitles: state.groupTitles || createNewGroupTitles(),
+		});
+		
+		saveTabGroups(state.fGroups || {});
+		saveHiddenGroups(state.hiddenGroups || []);
+		saveCollapsedGroups(state.collapsedGroups || []);
+		saveViewState(state.groupTitles || createNewGroupTitles());
 	},
 }));

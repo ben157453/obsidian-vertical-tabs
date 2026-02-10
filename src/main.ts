@@ -95,6 +95,7 @@ export default class ObsidianVerticalTabs extends Plugin {
 
 	registerEvents() {
 		this.registerScrollableTabsEvents();
+		this.registerWorkspaceEvents();
 	}
 
 	registerScrollableTabsEvents() {
@@ -111,6 +112,55 @@ export default class ObsidianVerticalTabs extends Plugin {
 			})
 		);
 	}
+
+	registerWorkspaceEvents() {
+		this.registerEvent(
+			(this.app.workspace as any).on("workspace-save", this.onWorkspaceSave)
+		);
+		this.registerEvent(
+			(this.app.workspace as any).on("workspace-load", this.onWorkspaceLoad)
+		);
+	}
+
+	private onWorkspaceSave = (workspaceName: string) => {
+		try {
+			if (!workspaceName || !this.settings.workspaceIntegration) return;
+
+			const state = useViewState.getState();
+			
+			if (!this.settings.workspaceStates) {
+				this.settings.workspaceStates = {};
+			}
+			
+			this.settings.workspaceStates[workspaceName] = {
+				fGroups: state.fGroups,
+				activeFGroupId: state.activeFGroupId,
+				hiddenGroups: state.hiddenGroups,
+				collapsedGroups: state.collapsedGroups,
+				groupTitles: state.groupTitles,
+			};
+			this.saveSettings();
+			
+			console.log(`[VerticalTabs] Saved state for workspace: ${workspaceName}`);
+		} catch (error) {
+			console.error('[VerticalTabs] Error saving workspace state:', error);
+		}
+	};
+
+	private onWorkspaceLoad = (workspaceName: string) => {
+		try {
+			if (!workspaceName || !this.settings.workspaceIntegration || !this.settings.workspaceStates) return;
+
+			const state = this.settings.workspaceStates[workspaceName];
+			if (state) {
+				const viewState = useViewState.getState();
+				viewState.restoreWorkspaceState(state);
+				console.log(`[VerticalTabs] Loaded state for workspace: ${workspaceName}`);
+			}
+		} catch (error) {
+			console.error('[VerticalTabs] Error loading workspace state:', error);
+		}
+	};
 
 	async setupCommands() {
 		this.addCommand({

@@ -37,6 +37,12 @@ interface ObsidianVerticalTabsSettings {
 	disableOnThisDevice: boolean;
 	enableUpdateCheck: boolean;
 	showNewTabButtonAtBottom: boolean;
+	workspaceStates?: Record<string, any>;
+	workspaceIntegration?: boolean;
+	fGroups?: any;
+	hiddenGroups?: string[];
+	collapsedGroups?: string[];
+	groupTitles?: any;
 }
 
 export const DEFAULT_SETTINGS: ObsidianVerticalTabsSettings = {
@@ -75,6 +81,12 @@ export const DEFAULT_SETTINGS: ObsidianVerticalTabsSettings = {
 	disableOnThisDevice: false,
 	enableUpdateCheck: true,
 	showNewTabButtonAtBottom: false,
+	workspaceStates: {},
+	workspaceIntegration: true,
+	fGroups: {},
+	hiddenGroups: [],
+	collapsedGroups: [],
+	groupTitles: {},
 };
 
 export type Settings = ObsidianVerticalTabsSettings;

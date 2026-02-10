@@ -136,12 +136,6 @@ export const FGroup = (props: FGroupProps) => {
 	const menuItems = (
 		<>
 			<IconButton
-				icon={isCollapsed ? "right-triangle" : "down-triangle"}
-				action="collapse"
-				tooltip={isCollapsed ? "Expand" : "Collapse"}
-				onClick={onToggleCollapse}
-			/>
-			<IconButton
 				icon={isHidden ? "eye" : "eye-off"}
 				action="show"
 				tooltip={isHidden ? "Show" : "Hide"}
@@ -162,15 +156,21 @@ export const FGroup = (props: FGroupProps) => {
 		</>
 	);
 
+	const collapseIcon = isCollapsed ? "right-chevron-glyph" : "down-chevron-glyph";
+
 	return (
 		<NavigationTreeItem
 			id={fGroup.id}
 			isTab={false}
 			title={fGroup.name}
 			onClick={handleClick}
+			onIconClick={(e) => {
+				e?.stopPropagation();
+				onToggleCollapse();
+			}}
 			dataType="fgroup"
 			toolbar={menuItems}
-			icon="folder"
+			icon={collapseIcon}
 			isCollapsed={isCollapsed}
 			isSidebar={false}
 			isSingleGroup={false}

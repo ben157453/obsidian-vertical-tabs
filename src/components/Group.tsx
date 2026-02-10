@@ -304,7 +304,27 @@ export const Group = (props: GroupProps) => {
 				.setTitle("Remove from fgroup")
 				.onClick(() => {
 					if (!group) return;
-					removeGroupFromFGroup(group.id);
+					const { fGroups } = useViewState.getState();
+					const containingFGroups = Object.values(fGroups).filter(
+						(fGroup) => fGroup.groupIds.includes(group.id)
+					);
+					
+					if (containingFGroups.length === 0) return;
+					
+					if (containingFGroups.length === 1) {
+						removeGroupFromFGroup(group.id, containingFGroups[0].id);
+					} else {
+						new FGroupSelectModal(app, containingFGroups.map((fg) => fg.name), (fGroupName) => {
+							if (fGroupName) {
+								const targetFGroup = containingFGroups.find(
+									(fGroup) => fGroup.name === fGroupName
+								);
+								if (targetFGroup) {
+									removeGroupFromFGroup(group.id, targetFGroup.id);
+								}
+							}
+						}).open();
+					}
 				});
 		});
 	}

@@ -41,6 +41,7 @@ interface NavigationTreeItemProps {
 		event: React.MouseEvent<HTMLDivElement, MouseEvent>
 	) => void;
 	onMouseOver?: (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => void;
+	onIconClick?: (event?: React.MouseEvent<HTMLDivElement, MouseEvent>) => void;
 	dataType?: string;
 	dataId?: string;
 	classNames?: Record<string, boolean>;
@@ -111,7 +112,7 @@ export const NavigationTreeItem = (props: NavigationTreeItemProps) => {
 				className={toClassName(itemElClasses)}
 				data-type={props.dataType}
 				data-id={props.dataId}
-				style={{ minHeight: props.isCollapsed ? 0 : height }}
+				style={{ minHeight: props.isCollapsed ? "auto" : height }}
 				ref={props.ref}
 			>
 				<div
@@ -124,7 +125,14 @@ export const NavigationTreeItem = (props: NavigationTreeItemProps) => {
 					onDoubleClick={props.onDoubleClick}
 					onContextMenu={props.onContextMenu}
 				>
-					<div className="tree-item-icon" ref={iconEl}></div>
+					<div 
+						className="tree-item-icon" 
+						ref={iconEl}
+						onClick={(e) => {
+							e.stopPropagation();
+							props.onIconClick?.(e);
+						}}
+					></div>
 					<div className="tree-item-inner">
 						<div className="tree-item-inner-text">
 							{props.title}
@@ -159,7 +167,7 @@ export const NavigationTreeItem = (props: NavigationTreeItemProps) => {
 				className={toClassName(itemElClasses)}
 				data-type={props.dataType}
 				data-id={props.dataId}
-				style={{ minHeight: props.isCollapsed ? 0 : height }}
+				style={{ minHeight: props.isCollapsed ? "auto" : height }}
 				ref={props.ref}
 			>
 				<div
@@ -174,7 +182,14 @@ export const NavigationTreeItem = (props: NavigationTreeItemProps) => {
 					{...attributes}
 					{...listeners}
 				>
-					<div className="tree-item-icon" ref={iconEl}></div>
+					<div 
+						className="tree-item-icon" 
+						ref={iconEl}
+						onClick={(e) => {
+							e.stopPropagation();
+							props.onIconClick?.(e);
+						}}
+					></div>
 					<div className="tree-item-inner">
 						<div className="tree-item-inner-text">
 							{props.title}

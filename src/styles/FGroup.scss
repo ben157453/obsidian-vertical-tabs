@@ -1,4 +1,20 @@
 .vt-tree-item.is-fgroup {
+	.tree-item-icon {
+		cursor: pointer;
+		padding: 4px;
+		margin-right: 4px;
+		border-radius: 4px;
+		transition: all 0.2s ease-in-out;
+
+		&:hover {
+			background-color: var(--background-modifier-hover);
+		}
+
+		&:active {
+			transform: scale(0.95);
+		}
+	}
+
 	.tree-item-self {
 		font-weight: 600;
 		background-color: var(--background-secondary);
@@ -29,18 +45,40 @@
 		.tree-item-children {
 			display: none;
 		}
+
+		.tree-item-self {
+			min-height: 32px;
+			display: flex;
+			align-items: center;
+		}
 	}
 
 	&.is-active {
 		.tree-item-self {
-			background-color: var(--interactive-accent);
+			background: linear-gradient(135deg, var(--interactive-accent) 0%, var(--interactive-accent-hover) 100%);
 			color: var(--text-on-accent);
 			border-left-color: var(--interactive-accent-hover);
-			font-weight: 700;
-			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-			text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 			border-left-width: 5px;
-			background: linear-gradient(135deg, var(--interactive-accent) 0%, var(--interactive-accent-hover) 100%);
+			font-weight: 700;
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 3px rgba(0, 0, 0, 0.1);
+			text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+			transform: translateY(-1px);
+			transition: all 0.2s ease-in-out;
+		}
+
+		.tree-item-icon {
+			color: var(--text-on-accent);
+			filter: brightness(1.2);
+			background-color: rgba(255, 255, 255, 0.1);
+
+			&:hover {
+				background-color: rgba(255, 255, 255, 0.2);
+			}
+		}
+
+		.tree-item-inner-text {
+			color: var(--text-on-accent);
+			font-weight: 700;
 		}
 	}
 }
