@@ -31,6 +31,8 @@ import { migrateAllData } from "./history/Migration";
 import { VERTICAL_TABS_ICON } from "./icon";
 import { DISABLE_KEY } from "./models/PluginContext";
 import { scrollToActiveTab } from "./services/ScrollableTabs";
+import { tabCacheStore } from "./stores/TabCacheStore";
+import { moveTabToEnd } from "./services/MoveTab";
 
 export default class ObsidianVerticalTabs extends Plugin {
 	settings: Settings = DEFAULT_SETTINGS;
@@ -352,13 +354,57 @@ export default class ObsidianVerticalTabs extends Plugin {
 					const { path, subpath } = parseLink(linkText);
 					const name = path ? `${path}.md` : sourcePath;
 					addTask(name, subpath);
-					return old.call(
+					const { hasShiftEnterPressed, latestActiveLeaf: originalLeaf } =
+						useViewState.getState();
+					const newLeafArg = newLeaf || hasShiftEnterPressed || false;
+					const desiredOpenViewState = hasShiftEnterPressed
+						? { ...(openViewState ?? {}), active: false }
+						: openViewState;
+					const result = await old.call(
 						this,
 						linkText,
 						sourcePath,
-						newLeaf,
-						openViewState
+						newLeafArg,
+						desiredOpenViewState
 					);
+					try {
+						const { hasShiftEnterPressed, latestActiveLeaf } =
+							useViewState.getState();
+						if (hasShiftEnterPressed && latestActiveLeaf) {
+							const app = this.app;
+							const activeView = this.getActiveViewOfType(ItemView);
+							const activeLeaf = activeView?.leaf;
+							const sourceGroupId =
+								latestActiveLeaf.parent?.id ||
+								activeLeaf?.parent?.id;
+							const { fGroups, activeFGroupId } = useViewState.getState();
+							
+							if (activeFGroupId && sourceGroupId) {
+								const activeFGroup = fGroups[activeFGroupId];
+								if (activeFGroup && activeFGroup.groupIds.length > 0) {
+									const lastGroupId = activeFGroup.groupIds[activeFGroup.groupIds.length - 1];
+									const { content } = tabCacheStore.getState();
+									const target = content.get(lastGroupId);
+									const targetGroup = target?.group;
+									if (app && targetGroup && activeLeaf) {
+										console.log("[VerticalTabs] moving tab to last group in FGroup", {
+											activeLeafId: activeLeaf.id,
+											targetGroupId: lastGroupId,
+											fGroupId: activeFGroupId
+										});
+										moveTabToEnd(app, activeLeaf.id, targetGroup);
+										useViewState.getState().setShiftEnterState(false);
+										if (originalLeaf) {
+											try {
+												app.workspace.revealLeaf(originalLeaf);
+											} catch {}
+										}
+									}
+								}
+							}
+						}
+					} catch {}
+					return result;
 				};
 			},
 		});

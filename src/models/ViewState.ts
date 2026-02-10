@@ -88,6 +88,7 @@ export const createNewViewCueFirstTabs = () =>
 	new DefaultRecord(() => null) as ViewCueFirstTabs;
 
 export const ALT_KEY_EFFECT_DURATION = 2000;
+export const SHIFT_ENTER_EFFECT_DURATION = 1000;
 
 interface ViewState {
 	groupTitles: GroupTitles;
@@ -103,6 +104,7 @@ interface ViewState {
 	isEditingTabs: boolean;
 	hasCtrlKeyPressed: boolean;
 	hasAltKeyPressed: boolean;
+	hasShiftEnterPressed: boolean;
 	viewCueOffset: number;
 	viewCueNativeCallbacks: ViewCueNativeCallbackMap;
 	viewCueFirstTabs: ViewCueFirstTabs;
@@ -127,6 +129,7 @@ interface ViewState {
 	resetFocusFlags: () => void;
 	hookLatestActiveTab: (tab: HTMLElement | null) => void;
 	scorllToActiveTab: () => void;
+	setShiftEnterState: (pressed: boolean) => void;
 	leftButtonClone: HTMLElement | null;
 	rightButtonClone: HTMLElement | null;
 	topLeftContainer: Element | null;
@@ -312,6 +315,7 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	isEditingTabs: false,
 	hasCtrlKeyPressed: false,
 	hasAltKeyPressed: false,
+	hasShiftEnterPressed: false,
 	viewCueOffset: 0,
 	viewCueNativeCallbacks: new Map(),
 	viewCueFirstTabs: createNewViewCueFirstTabs(),
@@ -701,6 +705,9 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	},
 	setAltKeyState(isPressed: boolean) {
 		set({ hasAltKeyPressed: isPressed });
+	},
+	setShiftEnterState(isPressed: boolean) {
+		set({ hasShiftEnterPressed: isPressed });
 	},
 	increaseViewCueOffset: debounce(() => {
 		const { viewCueOffset, latestActiveLeaf } = get();
