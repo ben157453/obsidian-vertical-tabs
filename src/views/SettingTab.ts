@@ -921,16 +921,6 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 		});
 
 		this.createToggle(group, {
-			name: "Workspace Integration",
-			desc: "Save and load plugin state with workspaces (requires Workspaces Plus plugin). FGroups, hidden groups, and collapsed groups will be restored when switching workspaces.",
-			value: this.plugin.settings.workspaceIntegration ?? true,
-			onChange: (value) => {
-				useSettings.getState().setSettings({ workspaceIntegration: value });
-				this.refresh();
-			},
-		});
-
-		this.createToggle(group, {
 			name: "Check for updates",
 			desc: "Automatically check for plugin updates when opening settings.",
 			value: this.plugin.settings.enableUpdateCheck ?? true,

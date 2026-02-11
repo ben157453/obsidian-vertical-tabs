@@ -208,7 +208,6 @@ interface ViewState {
 	toggleFGroupVisibility: (groupId: string, isHidden: boolean) => void;
 	getFGroup: (groupId: string) => FGroup | null;
 	getGroupByTabId: (tabId: string) => FGroup | null;
-	restoreWorkspaceState: (state: any) => void;
 	copyFGroupMembership: (sourceGroupId: string, targetGroupId: string) => void;
 }
 
@@ -1124,22 +1123,6 @@ export const useViewState = create<ViewState>()((set, get) => ({
 
 		const prevIndex = currentIndex <= 0 ? fGroupList.length - 1 : currentIndex - 1;
 		get().toggleFGroup(fGroupList[prevIndex].id);
-	},
-	restoreWorkspaceState: (state: any) => {
-		if (!state) return;
-		
-		set({
-			fGroups: state.fGroups || {},
-			activeFGroupId: state.activeFGroupId || null,
-			hiddenGroups: state.hiddenGroups || [],
-			collapsedGroups: state.collapsedGroups || [],
-			groupTitles: state.groupTitles || createNewGroupTitles(),
-		});
-		
-		saveTabGroups(state.fGroups || {});
-		saveHiddenGroups(state.hiddenGroups || []);
-		saveCollapsedGroups(state.collapsedGroups || []);
-		saveViewState(state.groupTitles || createNewGroupTitles());
 	},
 	copyFGroupMembership: (sourceGroupId: string, targetGroupId: string) => {
 		if (!sourceGroupId || !targetGroupId) return;
