@@ -38,14 +38,6 @@ export function updateFGroupLabelsForLeaf(leaf: WorkspaceLeaf) {
 		cls: "vt-fgroup-labels",
 	});
 
-	const groupTitle = groupTitles.get(groupId);
-	if (groupTitle) {
-		const groupLabel = newLabelsContainer.createSpan({
-			cls: GROUP_LABEL_CLASS,
-			text: groupTitle,
-		});
-	}
-
 	containingFGroups.forEach((fGroup) => {
 		const label = newLabelsContainer.createSpan({
 			cls: F_GROUP_LABEL_CLASS,
@@ -58,6 +50,14 @@ export function updateFGroupLabelsForLeaf(leaf: WorkspaceLeaf) {
 			label.addClass(F_GROUP_LABEL_INACTIVE_CLASS);
 		}
 	});
+
+	const groupTitle = groupTitles.get(groupId);
+	if (groupTitle) {
+		const groupLabel = newLabelsContainer.createSpan({
+			cls: GROUP_LABEL_CLASS,
+			text: groupTitle,
+		});
+	}
 }
 
 export function removeFGroupLabelsForLeaf(leaf: WorkspaceLeaf) {
