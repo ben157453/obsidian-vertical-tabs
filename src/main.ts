@@ -158,6 +158,11 @@ export default class ObsidianVerticalTabs extends Plugin {
 				const viewState = useViewState.getState();
 				viewState.restoreWorkspaceState(state);
 				console.log(`[VerticalTabs] Loaded state for workspace: ${workspaceName}`);
+				
+				// Trigger UI refresh after restoring state
+				setTimeout(() => {
+					this.app.workspace.trigger("layout-change");
+				}, 100);
 			}
 		} catch (error) {
 			console.error('[VerticalTabs] Error loading workspace state:', error);
