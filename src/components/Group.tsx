@@ -261,7 +261,7 @@ export const Group = (props: GroupProps) => {
 				.onClick(() => {
 					if (!group) return;
 					new FGroupNameModal(app, (name) => {
-						createFGroup(name, [group.id]);
+						createFGroup(name);
 					}).open();
 				});
 		});
@@ -325,6 +325,42 @@ export const Group = (props: GroupProps) => {
 							}
 						}).open();
 					}
+				});
+		});
+		menu.addItem((item) => {
+			item.setSection("control")
+				.setTitle("Move to fgroup")
+				.onClick(() => {
+					if (!group) return;
+					const { fGroups } = useViewState.getState();
+					// 获取当前组所在的所有F组
+					const containingFGroups = Object.values(fGroups).filter(
+						(fGroup) => fGroup.groupIds.includes(group.id)
+					);
+					// 获取所有可用的F组名称（排除当前组已经在的F组）
+					const availableFGroups = Object.values(fGroups).filter(
+						(fGroup) => !fGroup.groupIds.includes(group.id)
+					);
+					const fGroupOptions = availableFGroups.map((fGroup) => fGroup.name);
+					
+					if (fGroupOptions.length === 0) {
+						return;
+					}
+					
+					new FGroupSelectModal(app, fGroupOptions, (fGroupName) => {
+						if (!fGroupName || !group) return;
+						const targetFGroup = Object.values(fGroups).find(
+							(fGroup) => fGroup.name === fGroupName
+						);
+						if (targetFGroup) {
+							// 从当前所在的F组中移除
+							containingFGroups.forEach((fGroup) => {
+								removeGroupFromFGroup(group.id, fGroup.id);
+							});
+							// 添加到目标F组
+							addGroupToFGroup(group.id, targetFGroup.id);
+						}
+					}).open();
 				});
 		});
 	}

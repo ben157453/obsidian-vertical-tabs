@@ -139,6 +139,14 @@ export default class ObsidianVerticalTabs extends Plugin {
 				useViewState.getState().switchToPreviousFGroup();
 			},
 		});
+
+		this.addCommand({
+			id: "swap-fgroup-subgroups",
+			name: "Swap FGroup subgroups positions",
+			callback: () => {
+				useViewState.getState().swapFGroupSubgroups(this.app);
+			},
+		});
 	}
 
 	async openVerticalTabs() {

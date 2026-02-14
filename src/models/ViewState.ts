@@ -38,6 +38,7 @@ import { managedLeafStore } from "src/stores/ManagedLeafStore";
 import { EVENTS } from "src/constants/Events";
 import { REFRESH_TIMEOUT_LONG } from "src/constants/Timeouts";
 import { isHoverEditorEnabled } from "src/services/HoverEditorTabs";
+import { autoResizeLayout } from "src/services/AutoResizeLayout";
 export const DEFAULT_GROUP_TITLE = "Grouped tabs";
 const factory = () => DEFAULT_GROUP_TITLE;
 
@@ -200,7 +201,7 @@ interface ViewState {
 	isLinkedGroup: (groupID: Identifier) => boolean;
 	setGroupViewTypeForCurrentGroup: (viewType: GroupViewType) => void;
 	exitMissionControlForCurrentGroup: () => void;
-	createFGroup: (name: string, groupIds: string[]) => string;
+	createFGroup: (name: string, groupIds?: string[]) => string;
 	renameFGroup: (groupId: string, newName: string) => void;
 	addGroupToFGroup: (groupId: string, fGroupId: string) => void;
 	removeGroupFromFGroup: (groupId: string, fGroupId?: string) => void;
@@ -209,6 +210,7 @@ interface ViewState {
 	getFGroup: (groupId: string) => FGroup | null;
 	getGroupByTabId: (tabId: string) => FGroup | null;
 	copyFGroupMembership: (sourceGroupId: string, targetGroupId: string) => void;
+	swapFGroupSubgroups: (app: App) => void;
 }
 
 const saveViewState = (titles: GroupTitles) => {
@@ -906,12 +908,20 @@ export const useViewState = create<ViewState>()((set, get) => ({
 			setGroupViewType(group, GroupViewType.Default);
 		}
 	},
-	createFGroup(name: string, groupIds: string[]) {
-		const { fGroups } = get();
+	createFGroup(name: string, groupIds?: string[]) {
+		const { fGroups, groupTitles } = get();
+		// 如果没有提供groupIds，获取当前所有存在的子组ID
+		let initialGroupIds = groupIds || tabCacheStore.getState().groupIDs;
+		// 按组名称字母排序
+		initialGroupIds = [...initialGroupIds].sort((a, b) => {
+			const nameA = groupTitles.get(a) || "";
+			const nameB = groupTitles.get(b) || "";
+			return nameA.localeCompare(nameB);
+		});
 		const newGroup: FGroup = {
 			id: `fgroup-${Date.now()}`,
 			name,
-			groupIds,
+			groupIds: initialGroupIds,
 			isHidden: false,
 		};
 		const newFGroups = { ...fGroups, [newGroup.id]: newGroup };
@@ -1033,57 +1043,26 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		const targetFGroup = fGroups[fGroupId];
 		if (!targetFGroup) return;
 
-		// 计算所有FGroup中共享的子组ID
-		const groupIdCounts = new Map<string, number>();
-		for (const fgId in fGroups) {
-			const fg = fGroups[fgId];
-			fg.groupIds.forEach((groupId) => {
-				groupIdCounts.set(groupId, (groupIdCounts.get(groupId) || 0) + 1);
-			});
-		}
-		const sharedGroupIds = new Set<string>();
-		groupIdCounts.forEach((count, groupId) => {
-			if (count > 1) {
-				sharedGroupIds.add(groupId);
-			}
-		});
+		// 每个F组现在维护独立的groupIds
+		// 显示当前F组的子组，隐藏不在当前F组中的子组
+		const targetGroupIds = new Set(targetFGroup.groupIds);
 
-		// 计算需要隐藏的组ID
-		const groupsToHide = new Set<string>();
+		// 先处理显示：移除当前F组子组的隐藏状态
+		let newHiddenGroups = [...get().hiddenGroups];
+		newHiddenGroups = newHiddenGroups.filter((id) => !targetGroupIds.has(id));
+
+		// 再处理隐藏：添加不在当前F组中的子组
 		for (const fgId in fGroups) {
 			if (fgId !== fGroupId) {
 				const fg = fGroups[fgId];
 				fg.groupIds.forEach((groupId) => {
-					// 只隐藏非共享的组
-					if (!sharedGroupIds.has(groupId)) {
-						groupsToHide.add(groupId);
+					// 只有不在当前F组中的才隐藏
+					if (!targetGroupIds.has(groupId) && !newHiddenGroups.includes(groupId)) {
+						newHiddenGroups.push(groupId);
 					}
 				});
 			}
 		}
-
-		// 计算需要显示的组ID
-		const groupsToShow = new Set<string>();
-		targetFGroup.groupIds.forEach((groupId) => {
-			groupsToShow.add(groupId);
-		});
-		// 添加所有共享组
-		sharedGroupIds.forEach((groupId) => {
-			groupsToShow.add(groupId);
-		});
-
-		// 更新隐藏组状态
-		let newHiddenGroups = [...get().hiddenGroups];
-		
-		// 先移除所有需要显示的组
-		newHiddenGroups = newHiddenGroups.filter((id) => !groupsToShow.has(id));
-		
-		// 再添加所有需要隐藏的组
-		groupsToHide.forEach((id) => {
-			if (!newHiddenGroups.includes(id)) {
-				newHiddenGroups.push(id);
-			}
-		});
 
 		// 更新状态
 		set({ 
@@ -1144,4 +1123,90 @@ export const useViewState = create<ViewState>()((set, get) => ({
 			}
 		});
 	},
+	swapFGroupSubgroups: (app: App) => {
+		const { fGroups, activeFGroupId } = get();
+		
+		if (!activeFGroupId) return;
+		
+		const activeFGroup = fGroups[activeFGroupId];
+		if (!activeFGroup) return;
+		
+		if (activeFGroup.groupIds.length < 2) return;
+		
+		// 轮询逻辑：将最后一个子组移动到第一个位置
+		const newGroupIds = [...activeFGroup.groupIds];
+		const lastGroupId = newGroupIds.pop();
+		if (lastGroupId) {
+			newGroupIds.unshift(lastGroupId);
+		}
+		
+		// 更新状态
+		const newFGroups = { ...fGroups };
+		newFGroups[activeFGroupId] = {
+			...activeFGroup,
+			groupIds: newGroupIds,
+		};
+		
+		set({ fGroups: newFGroups });
+		saveTabGroups(newFGroups);
+		
+		// 重新排列实际的 DOM 和内部数组顺
+		reorderFGroupChildren(app, newGroupIds);
+		
+		// 触发UI显隐状态更新
+		get().toggleFGroup(activeFGroupId);
+		
+		// 关键：强制刷新布局样式，重新计算宽度
+		setTimeout(() => {
+			autoResizeLayout(app);
+		}, 50);
+	},
 }));
+
+function reorderFGroupChildren(app: App, groupIds: string[]) {
+	const workspace = app.workspace;
+	const rootSplit = workspace.rootSplit;
+	
+	if (!rootSplit) return;
+	
+	function reorderInSplit(split: any) {
+		const splitEl = split.containerEl;
+		if (!splitEl) return;
+		
+		const children = split.children as any[];
+		const visibleMatching = children.filter(child => groupIds.includes(child.id));
+		
+		// 如果当前 split 下含有两个或以上属于该 F 组的子组，进行重排
+		if (visibleMatching.length >= 2) {
+			// 按 groupIds 的新顺序筛选出这些子组
+			const ordered = groupIds
+				.map(id => children.find(c => c.id === id))
+				.filter(Boolean) as any[];
+
+			ordered.forEach(child => {
+				// 1. 同步逻辑数组：将该子组移到末尾（依次 append，最终即为目标顺序）
+				const currentIndex = split.children.indexOf(child);
+				if (currentIndex !== -1) {
+					split.children.splice(currentIndex, 1);
+					split.children.push(child);
+				}
+				
+				// 2. 同步物理 DOM：使用 appendChild 移动元素位置
+				if (child.containerEl && splitEl) {
+					splitEl.appendChild(child.containerEl);
+				}
+			});
+		}
+		
+		// 递归处理嵌套的 split
+		children.forEach(child => {
+			if (child.children && child.containerEl) {
+				reorderInSplit(child);
+			}
+		});
+	}
+	
+	reorderInSplit(rootSplit);
+	workspace.onLayoutChange();
+}
+
