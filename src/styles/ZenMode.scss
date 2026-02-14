@@ -26,6 +26,11 @@ body:not(.vt-zen-mode) .workspace-split.mod-root {
 
 body.vt-zen-mode:not(.is-popout-window) .workspace-split.mod-root {
 	.workspace-tabs {
+		// Hide tabs that are explicitly marked as hidden (for FGroup exclusivity)
+		&.is-hidden {
+			display: none !important;
+		}
+
 		&:not(.mod-active),
 		&:not(.vt-mod-active) {
 			display: none;
