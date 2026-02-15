@@ -2,12 +2,14 @@ import {
 	FileView,
 	ItemView,
 	MarkdownView,
+	Notice,
 	OpenViewState,
 	Platform,
 	Plugin,
 	View,
 	Workspace,
 	WorkspaceLeaf,
+	WorkspaceParent,
 	addIcon,
 } from "obsidian";
 import {
@@ -16,6 +18,41 @@ import {
 } from "src/views/VerticalTabsView";
 import { DEFAULT_SETTINGS, Settings } from "./models/PluginSettings";
 import { around } from "monkey-around";
+
+// Extended types for Obsidian API
+interface WorkspaceLeafExtended extends WorkspaceLeaf {
+    parent: any;
+}
+
+interface WorkspaceTabsExtended {
+    id: string;
+    type: "tabs";
+    children: WorkspaceLeafExtended[];
+}
+
+// Supported view types
+const supportedViewTypes = 'markdown';
+
+// Get parents for each leaf
+function getParentsForEachLeaf(allLeaves: WorkspaceLeafExtended[]): [Map<string, WorkspaceTabsExtended>, string[]] {
+	const allTabGroupsMap: Map<string, WorkspaceTabsExtended> = new Map();
+	const allTabGroups: string[] = [];
+	
+	allLeaves.forEach((leaf) => {
+		const leafParent = leaf.parent;
+		if (!leafParent || (leafParent as any).type !== "tabs") {
+			console.error(`Unexpected parent of leaf of type ${(leafParent as any)?.type}, expected 'tabs'. This is not supported and this tab will be skipped`);
+			return;
+		}
+		
+		if (!allTabGroupsMap.get(leafParent.id)) {
+			allTabGroupsMap.set(leafParent.id, leafParent as WorkspaceTabsExtended);
+			allTabGroups.push(leafParent.id);
+		}
+	});
+	
+	return [allTabGroupsMap, allTabGroups];
+}
 import { ZOOM_FACTOR_TOLERANCE } from "./services/TabZoom";
 import { useViewState } from "./models/ViewState";
 import { ObsidianVerticalTabsSettingTab } from "./views/SettingTab";
@@ -31,8 +68,8 @@ import { migrateAllData } from "./history/Migration";
 import { VERTICAL_TABS_ICON } from "./icon";
 import { DISABLE_KEY } from "./models/PluginContext";
 import { scrollToActiveTab } from "./services/ScrollableTabs";
-import { tabCacheStore } from "./stores/TabCacheStore";
 import { moveTabToEnd } from "./services/MoveTab";
+import { tabCacheStore } from "src/stores/TabCacheStore";
 
 export default class ObsidianVerticalTabs extends Plugin {
 	settings: Settings = DEFAULT_SETTINGS;
@@ -97,12 +134,121 @@ export default class ObsidianVerticalTabs extends Plugin {
 
 	registerEvents() {
 		this.registerScrollableTabsEvents();
+		this.registerKeyEvents();
+		this.registerCtrlClickLinkEvents();
+	}
+
+	registerKeyEvents() {
+		this.registerDomEvent(window, "keydown", (event) => {
+			const {
+				exitMissionControlForCurrentGroup,
+			} = useViewState.getState();
+
+			if (event.key === "Escape") {
+				exitMissionControlForCurrentGroup();
+			}
+		});
+	}
+
+	registerCtrlClickLinkEvents() {
+		// Track the last active leaf before Ctrl+click
+		let lastActiveLeafBeforeClick: WorkspaceLeaf | null = null;
+		let isExpectingNewTab = false;
+		let clickTimestamp = 0;
+
+		// Listen for Ctrl+click on links - use mousedown for earlier detection
+		this.registerDomEvent(document, "mousedown", (event) => {
+			const isCtrlPressed = event.ctrlKey || event.metaKey;
+			if (!isCtrlPressed) return;
+
+			// Check if clicked element is a link or inside a link
+			const target = event.target as HTMLElement;
+			const linkElement = target.closest("a");
+			if (!linkElement) return;
+
+			// Check if it's an internal link - more comprehensive detection
+			const href = linkElement.getAttribute("href") || linkElement.getAttribute("data-href") || "";
+			const isInternalLink = 
+				href.startsWith("#") || 
+				href.startsWith("app://") || 
+				linkElement.hasAttribute("data-href") ||
+				linkElement.classList.contains("internal-link") ||
+				linkElement.classList.contains("markdown-preview-view") ||
+				(!href.startsWith("http") && !href.startsWith("www") && href.length > 0);
+			
+			if (!isInternalLink) return;
+
+			// Store the current active leaf before the new tab opens
+			lastActiveLeafBeforeClick = this.app.workspace.activeLeaf;
+			isExpectingNewTab = true;
+			clickTimestamp = Date.now();
+		}, true); // Use capture phase to catch the event early
+
+		// Also listen on click as fallback
+		this.registerDomEvent(document, "click", (event) => {
+			if (isExpectingNewTab) return; // Already detected in mousedown
+			
+			const isCtrlPressed = event.ctrlKey || event.metaKey;
+			if (!isCtrlPressed) return;
+
+			const target = event.target as HTMLElement;
+			const linkElement = target.closest("a");
+			if (!linkElement) return;
+
+			const href = linkElement.getAttribute("href") || linkElement.getAttribute("data-href") || "";
+			const isInternalLink = 
+				href.startsWith("#") || 
+				href.startsWith("app://") || 
+				linkElement.hasAttribute("data-href") ||
+				linkElement.classList.contains("internal-link") ||
+				(!href.startsWith("http") && !href.startsWith("www") && href.length > 0);
+			
+			if (!isInternalLink) return;
+
+			lastActiveLeafBeforeClick = this.app.workspace.activeLeaf;
+			isExpectingNewTab = true;
+			clickTimestamp = Date.now();
+		}, true);
+
+		// Listen for new leaf creation after Ctrl+click
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				if (!isExpectingNewTab || !lastActiveLeafBeforeClick) return;
+				if (!leaf) return;
+
+				// Check if this is a new leaf (different from the one before click)
+				if (leaf.id === lastActiveLeafBeforeClick.id) return;
+
+				// Check if the timing is reasonable (within 2 seconds of click)
+				const timeSinceClick = Date.now() - clickTimestamp;
+				if (timeSinceClick > 2000) {
+					isExpectingNewTab = false;
+					lastActiveLeafBeforeClick = null;
+					return;
+				}
+
+				// Reset the flag immediately to prevent duplicate processing
+				isExpectingNewTab = false;
+
+				// Check if the new leaf is a file view (not settings, etc.)
+				const viewType = leaf.view.getViewType();
+				if (viewType !== "markdown" && viewType !== "image" && viewType !== "pdf") {
+					lastActiveLeafBeforeClick = null;
+					return;
+				}
+
+				// Move the new tab to next FGroup subgroup immediately (no setTimeout)
+				this.moveLeafToNextFGroupSubgroupFast(leaf);
+				lastActiveLeafBeforeClick = null;
+			})
+		);
 	}
 
 	registerScrollableTabsEvents() {
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
 				scrollToActiveTab(leaf);
+				useViewState.getState().setLatestActiveLeaf(this);
 			})
 		);
 		this.registerEvent(
@@ -147,6 +293,69 @@ export default class ObsidianVerticalTabs extends Plugin {
 				useViewState.getState().swapFGroupSubgroups(this.app);
 			},
 		});
+
+		this.addCommand({
+			id: "move-tab-to-next-fgroup-subgroup",
+			name: "Move tab to next FGroup subgroup",
+			callback: () => this.moveTabToNextGroup(1),
+			hotkeys: [
+				{
+					modifiers: ["Ctrl", "Alt"],
+					key: ']'
+				}
+			]
+		});
+
+		this.addCommand({
+			id: "move-tab-to-prev-fgroup-subgroup",
+			name: "Move tab to previous FGroup subgroup",
+			callback: () => this.moveTabToNextGroup(-1),
+			hotkeys: [
+				{
+					modifiers: ["Ctrl", "Alt"],
+					key: '['
+				}
+			]
+		});
+
+		// Quick switch between recent subgroups (like Ctrl+Tab)
+		this.addCommand({
+			id: "switch-to-recent-fgroup-subgroup",
+			name: "Switch to recent FGroup subgroup",
+			callback: () => {
+				useViewState.getState().switchToRecentSubgroup(this.app);
+			},
+			hotkeys: [
+				{
+					modifiers: ["Ctrl"],
+					key: '`'
+				}
+			]
+		});
+
+		// Cycle through all subgroups in current FGroup
+		this.addCommand({
+			id: "cycle-fgroup-subgroups",
+			name: "Cycle FGroup subgroups",
+			callback: () => {
+				useViewState.getState().cycleSubgroupsInFGroup(this.app);
+			},
+			hotkeys: [
+				{
+					modifiers: ["Ctrl", "Shift"],
+					key: '`'
+				}
+			]
+		});
+
+		// Quick switch between recent FGroups (like Alt+Tab)
+		this.addCommand({
+			id: "switch-to-recent-fgroup",
+			name: "Switch to recent FGroup",
+			callback: () => {
+				useViewState.getState().switchToRecentFGroup();
+			}
+		});
 	}
 
 	async openVerticalTabs() {
@@ -162,9 +371,7 @@ export default class ObsidianVerticalTabs extends Plugin {
 	}
 
 	onunload() {
-		if (this.settings.enhancedKeyboardTabSwitch) {
-			useViewState.getState().resetViewCueCallback(this.app);
-		}
+		// Clean up resources if needed
 	}
 
 	async loadSettings() {
@@ -300,72 +507,7 @@ export default class ObsidianVerticalTabs extends Plugin {
 			})
 		);
 
-		around(Workspace.prototype, {
-			openLinkText(old) {
-				return async function (
-					linkText: string,
-					sourcePath: string,
-					newLeaf?: boolean,
-					openViewState?: OpenViewState
-				) {
-					const { addTask } = linkTasksStore.getActions();
-					const { path, subpath } = parseLink(linkText);
-					const name = path ? `${path}.md` : sourcePath;
-					addTask(name, subpath);
-					const { hasShiftEnterPressed, latestActiveLeaf: originalLeaf } =
-						useViewState.getState();
-					const newLeafArg = newLeaf || hasShiftEnterPressed || false;
-					const desiredOpenViewState = hasShiftEnterPressed
-						? { ...(openViewState ?? {}), active: false }
-						: openViewState;
-					const result = await old.call(
-						this,
-						linkText,
-						sourcePath,
-						newLeafArg,
-						desiredOpenViewState
-					);
-					try {
-						const { hasShiftEnterPressed, latestActiveLeaf } =
-							useViewState.getState();
-						if (hasShiftEnterPressed && latestActiveLeaf) {
-							const app = this.app;
-							const activeView = this.getActiveViewOfType(ItemView);
-							const activeLeaf = activeView?.leaf;
-							const sourceGroupId =
-								latestActiveLeaf.parent?.id ||
-								activeLeaf?.parent?.id;
-							const { fGroups, activeFGroupId } = useViewState.getState();
-							
-							if (activeFGroupId && sourceGroupId) {
-								const activeFGroup = fGroups[activeFGroupId];
-								if (activeFGroup && activeFGroup.groupIds.length > 0) {
-									const lastGroupId = activeFGroup.groupIds[activeFGroup.groupIds.length - 1];
-									const { content } = tabCacheStore.getState();
-									const target = content.get(lastGroupId);
-									const targetGroup = target?.group;
-									if (app && targetGroup && activeLeaf) {
-										console.log("[VerticalTabs] moving tab to last group in FGroup", {
-											activeLeafId: activeLeaf.id,
-											targetGroupId: lastGroupId,
-											fGroupId: activeFGroupId
-										});
-										moveTabToEnd(app, activeLeaf.id, targetGroup);
-										useViewState.getState().setShiftEnterState(false);
-										if (originalLeaf) {
-											try {
-												app.workspace.revealLeaf(originalLeaf);
-											} catch {}
-										}
-									}
-								}
-							}
-						}
-					} catch {}
-					return result;
-				};
-			},
-		});
+
 
 		this.register(
 			around(FileView.prototype, {
@@ -397,5 +539,365 @@ export default class ObsidianVerticalTabs extends Plugin {
 		);
 
 		this.register(patchQuickSwitcher(this.app));
+	}
+
+	// Check if a leaf is in the sidebar (left or right)
+	isLeafInSidebar(leaf: WorkspaceLeaf): boolean {
+		const workspace = this.app.workspace;
+		const leftSplit = workspace.leftSplit;
+		const rightSplit = workspace.rightSplit;
+		
+		// Walk up the parent chain to check if it's in left or right sidebar
+		let current: any = leaf;
+		while (current) {
+			if (current === leftSplit || current === rightSplit) {
+				return true;
+			}
+			current = current.parent;
+		}
+		return false;
+	}
+
+	// Move tab to next/previous group within current active FGroup
+	async moveTabToNextGroup(leftOrRight: -1 | 1) {
+		const workspace = this.app.workspace;
+		const activeLeaf = workspace.activeLeaf;
+		if (!activeLeaf) {
+			console.log("No active leaf, so cannot move tab to next group");
+			return;
+		}
+		
+		// Check if active leaf is in sidebar
+		if (this.isLeafInSidebar(activeLeaf)) {
+			console.log("Active leaf is in sidebar, skipping");
+			return;
+		}
+		
+		const activeFile = (activeLeaf.view as any).file;
+		if (!activeFile) {
+			console.log("No active file, can't determine what to open in new tab");
+			return;
+		}
+
+		// Get current active FGroup
+		const { fGroups, activeFGroupId } = useViewState.getState();
+		if (!activeFGroupId) {
+			console.log("No active FGroup, cannot move tab");
+			return;
+		}
+		
+		const currentFGroup = fGroups[activeFGroupId];
+		if (!currentFGroup) {
+			console.log("Active FGroup not found");
+			return;
+		}
+		
+		// Get subgroups in current FGroup
+		const fGroupSubgroupIds = currentFGroup.groupIds;
+		if (fGroupSubgroupIds.length === 0) {
+			console.log("Current FGroup has no subgroups");
+			return;
+		}
+
+		// Get all open leaves of supported types
+		const allLeaves = workspace.getLeavesOfType('markdown');
+		if (allLeaves.length <= 1) {
+			console.log(`0 or 1 leaves; nothing to move`);
+			return;
+		}
+
+		// Get tab groups (parents of all leaves) that are in current FGroup, excluding sidebar
+		const tabGroupsMap = new Map<string, any>();
+		const tabGroups: string[] = [];
+		
+		allLeaves.forEach((leaf) => {
+			// Skip leaves in sidebar
+			if (this.isLeafInSidebar(leaf)) {
+				return;
+			}
+			
+			const parent = (leaf as any).parent;
+			if (parent && parent.type === "tabs" && parent.id) {
+				// Only include groups that are in current FGroup
+				if (fGroupSubgroupIds.includes(parent.id) && !tabGroupsMap.has(parent.id)) {
+					tabGroupsMap.set(parent.id, parent);
+					tabGroups.push(parent.id);
+				}
+			}
+		});
+
+		if (tabGroups.length === 0) {
+			console.error("No tab groups found in current FGroup");
+			return;
+		}
+
+		let newLeaf: WorkspaceLeaf | null = null;
+		if (tabGroups.length === 1) {
+			// Only one tab group in FGroup, so split
+			newLeaf = workspace.getLeaf('split', 'vertical');
+		} else {
+			// Multiple tab groups in FGroup, so move to next/previous
+			const currentParent = (activeLeaf as any).parent;
+			if (!currentParent || !currentParent.id) {
+				console.error("Current leaf has no valid parent");
+				return;
+			}
+			
+			const currentIndex = tabGroups.findIndex(id => id === currentParent.id);
+			if (currentIndex === -1) {
+				console.error("Current tab group not found in current FGroup");
+				return;
+			}
+
+			// Calculate next index with wrap-around within FGroup
+			let nextIndex = currentIndex + leftOrRight;
+			if (nextIndex >= tabGroups.length) {
+				nextIndex = 0;
+			} else if (nextIndex < 0) {
+				nextIndex = tabGroups.length - 1;
+			}
+			
+			const targetTabGroup = tabGroupsMap.get(tabGroups[nextIndex]);
+			if (!targetTabGroup) {
+				console.error("Target tab group not found");
+				return;
+			}
+
+			// Open at the end of the tab group
+			const lastIdxInNewTabGroup = targetTabGroup.children.length;
+			newLeaf = workspace.createLeafInParent(targetTabGroup, lastIdxInNewTabGroup);
+		}
+
+		if (newLeaf) {
+			// Close existing leaf and open the same file in the newly created leaf
+			activeLeaf.detach();
+			await newLeaf.openFile(activeFile);
+			workspace.setActiveLeaf(newLeaf, { focus: true });
+		}
+	}
+
+	// Move a specific leaf to next FGroup subgroup (used for Ctrl+click link handling)
+	async moveLeafToNextFGroupSubgroup(leaf: WorkspaceLeaf) {
+		const workspace = this.app.workspace;
+		
+		// Check if leaf is in sidebar
+		if (this.isLeafInSidebar(leaf)) {
+			console.log("Leaf is in sidebar, skipping");
+			return;
+		}
+		
+		const activeFile = (leaf.view as any).file;
+		if (!activeFile) {
+			console.log("No file in leaf, cannot move");
+			return;
+		}
+
+		// Get current active FGroup
+		const { fGroups, activeFGroupId } = useViewState.getState();
+		if (!activeFGroupId) {
+			console.log("No active FGroup, cannot move tab");
+			return;
+		}
+		
+		const currentFGroup = fGroups[activeFGroupId];
+		if (!currentFGroup) {
+			console.log("Active FGroup not found");
+			return;
+		}
+		
+		// Get subgroups in current FGroup
+		const fGroupSubgroupIds = currentFGroup.groupIds;
+		if (fGroupSubgroupIds.length === 0) {
+			console.log("Current FGroup has no subgroups");
+			return;
+		}
+
+		// Get all open leaves of supported types
+		const allLeaves = workspace.getLeavesOfType('markdown');
+
+		// Get tab groups (parents of all leaves) that are in current FGroup, excluding sidebar
+		const tabGroupsMap = new Map<string, any>();
+		const tabGroups: string[] = [];
+		
+		allLeaves.forEach((l) => {
+			// Skip leaves in sidebar
+			if (this.isLeafInSidebar(l)) {
+				return;
+			}
+			
+			const parent = (l as any).parent;
+			if (parent && parent.type === "tabs" && parent.id) {
+				// Only include groups that are in current FGroup
+				if (fGroupSubgroupIds.includes(parent.id) && !tabGroupsMap.has(parent.id)) {
+					tabGroupsMap.set(parent.id, parent);
+					tabGroups.push(parent.id);
+				}
+			}
+		});
+
+		if (tabGroups.length === 0) {
+			console.error("No tab groups found in current FGroup");
+			return;
+		}
+
+		// Get current leaf's parent group
+		const currentParent = (leaf as any).parent;
+		if (!currentParent || !currentParent.id) {
+			console.error("Leaf has no valid parent");
+			return;
+		}
+
+		let targetTabGroup: any = null;
+		
+		if (tabGroups.length === 1) {
+			// Only one tab group - need to create a new split
+			const newLeaf = workspace.getLeaf('split', 'vertical');
+			if (newLeaf) {
+				leaf.detach();
+				await newLeaf.openFile(activeFile);
+				workspace.setActiveLeaf(newLeaf, { focus: true });
+			}
+			return;
+		} else {
+			// Multiple tab groups - find next one
+			const currentIndex = tabGroups.findIndex(id => id === currentParent.id);
+			if (currentIndex === -1) {
+				console.error("Current tab group not found in current FGroup");
+				return;
+			}
+
+			// Calculate next index with wrap-around within FGroup
+			let nextIndex = currentIndex + 1;
+			if (nextIndex >= tabGroups.length) {
+				nextIndex = 0;
+			}
+			
+			targetTabGroup = tabGroupsMap.get(tabGroups[nextIndex]);
+			if (!targetTabGroup) {
+				console.error("Target tab group not found");
+				return;
+			}
+		}
+
+		if (targetTabGroup) {
+			// Move the leaf to the target tab group
+			const lastIdxInNewTabGroup = targetTabGroup.children.length;
+			const newLeaf = workspace.createLeafInParent(targetTabGroup, lastIdxInNewTabGroup);
+			
+			if (newLeaf) {
+				leaf.detach();
+				await newLeaf.openFile(activeFile);
+				workspace.setActiveLeaf(newLeaf, { focus: true });
+			}
+		}
+	}
+
+	// Fast version for Ctrl+click - uses setViewState instead of detach/openFile for better performance
+	moveLeafToNextFGroupSubgroupFast(leaf: WorkspaceLeaf) {
+		const workspace = this.app.workspace;
+		
+		// Check if leaf is in sidebar
+		if (this.isLeafInSidebar(leaf)) {
+			return;
+		}
+
+		// Get current active FGroup
+		const { fGroups, activeFGroupId } = useViewState.getState();
+		if (!activeFGroupId) {
+			return;
+		}
+		
+		const currentFGroup = fGroups[activeFGroupId];
+		if (!currentFGroup) {
+			return;
+		}
+		
+		// Get subgroups in current FGroup
+		const fGroupSubgroupIds = currentFGroup.groupIds;
+		if (fGroupSubgroupIds.length === 0) {
+			return;
+		}
+
+		// Get current leaf's parent group
+		const currentParent = (leaf as any).parent;
+		if (!currentParent || !currentParent.id) {
+			return;
+		}
+
+		// Quick check: if current parent is not in FGroup, skip
+		if (!fGroupSubgroupIds.includes(currentParent.id)) {
+			return;
+		}
+
+		// Get tab groups in FGroup - use cached info from ViewState if possible
+		const tabGroups: string[] = [];
+		fGroupSubgroupIds.forEach((id: string) => {
+			// Try to find the tab group in workspace
+			const allLeaves = workspace.getLeavesOfType('markdown');
+			for (const l of allLeaves) {
+				const parent = (l as any).parent;
+				if (parent && parent.id === id && !tabGroups.includes(id)) {
+					tabGroups.push(id);
+					break;
+				}
+			}
+		});
+
+		if (tabGroups.length <= 1) {
+			// Only one tab group - need to split
+			// For fast version, we just split and move
+			const viewState = leaf.getViewState();
+			const newLeaf = workspace.getLeaf('split', 'vertical');
+			if (newLeaf) {
+				// Use setViewState for faster switching
+				newLeaf.setViewState(viewState);
+				leaf.detach();
+				workspace.setActiveLeaf(newLeaf, { focus: true });
+			}
+			return;
+		}
+
+		// Find current index and next index
+		const currentIndex = tabGroups.findIndex(id => id === currentParent.id);
+		if (currentIndex === -1) {
+			return;
+		}
+
+		let nextIndex = currentIndex + 1;
+		if (nextIndex >= tabGroups.length) {
+			nextIndex = 0;
+		}
+
+		const targetGroupId = tabGroups[nextIndex];
+		
+		// Find target tab group
+		let targetTabGroup: any = null;
+		const allLeaves = workspace.getLeavesOfType('markdown');
+		for (const l of allLeaves) {
+			const parent = (l as any).parent;
+			if (parent && parent.id === targetGroupId) {
+				targetTabGroup = parent;
+				break;
+			}
+		}
+
+		if (!targetTabGroup) {
+			return;
+		}
+
+		// Fast move: create new leaf, set view state, detach old leaf
+		const lastIdxInNewTabGroup = targetTabGroup.children.length;
+		const newLeaf = workspace.createLeafInParent(targetTabGroup, lastIdxInNewTabGroup);
+		
+		if (newLeaf) {
+			// Get view state before detaching
+			const viewState = leaf.getViewState();
+			// Set view state on new leaf (faster than openFile)
+			newLeaf.setViewState(viewState);
+			// Detach old leaf
+			leaf.detach();
+			// Set active
+			workspace.setActiveLeaf(newLeaf, { focus: true });
+		}
 	}
 }

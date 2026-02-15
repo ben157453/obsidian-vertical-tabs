@@ -37,6 +37,10 @@ interface ObsidianVerticalTabsSettings {
 	disableOnThisDevice: boolean;
 	enableUpdateCheck: boolean;
 	showNewTabButtonAtBottom: boolean;
+	collapseSubgroupsByDefault: boolean;
+	// 跨组投掷功能设置
+	enableLinkThrowing: boolean;
+	linkThrowingRequireModifier: boolean;
 }
 
 export const DEFAULT_SETTINGS: ObsidianVerticalTabsSettings = {
@@ -75,6 +79,10 @@ export const DEFAULT_SETTINGS: ObsidianVerticalTabsSettings = {
 	disableOnThisDevice: false,
 	enableUpdateCheck: true,
 	showNewTabButtonAtBottom: false,
+	collapseSubgroupsByDefault: true,
+	// 跨组投掷功能默认设置
+	enableLinkThrowing: true,
+	linkThrowingRequireModifier: true,
 };
 
 export type Settings = ObsidianVerticalTabsSettings;

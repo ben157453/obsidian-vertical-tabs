@@ -120,12 +120,12 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 	private createSetting(parentEl: HTMLElement | SettingGroup, callback?: (setting: Setting) => void) {
 		if (requireApiVersion("1.11.0") && parentEl instanceof SettingGroup) {
 			let setting: Setting | undefined;
-			parentEl.addSetting((s) => { setting = s; if(callback) callback(s); });
+			parentEl.addSetting((s) => { setting = s; if (callback) callback(s); });
 			if (!setting) throw new Error("Failed to create setting");
 			return setting;
 		} else if (parentEl instanceof HTMLElement) {
 			const setting = new Setting(parentEl);
-			if(callback) callback(setting);
+			if (callback) callback(setting);
 			return setting;
 		} else {
 			throw new Error("Invalid parent element or unsupported API version");
@@ -432,6 +432,17 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 			value: this.plugin.settings.showMoreButtons,
 			onChange: (value) => {
 				useSettings.getState().setSettings({ showMoreButtons: value });
+			},
+		});
+
+		this.createToggle(containerEl, {
+			name: "Collapse subgroups by default",
+			desc: "All subgroups (not FGroups) will be collapsed by default.",
+			value: this.plugin.settings.collapseSubgroupsByDefault,
+			onChange: (value) => {
+				useSettings
+					.getState()
+					.setSettings({ collapseSubgroupsByDefault: value });
 			},
 		});
 	}
@@ -931,6 +942,8 @@ export class ObsidianVerticalTabsSettingTab extends PluginSettingTab {
 				this.refresh();
 			},
 		});
+
+
 	}
 
 	private async toggleDisableOnThisDevice(isDisabled: boolean) {

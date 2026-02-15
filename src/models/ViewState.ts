@@ -29,6 +29,7 @@ import { tabCacheStore } from "../stores/TabCacheStore";
 import { pinDrawer, unpinDrawer } from "src/services/MobileDrawer";
 import { CommandCheckCallback, getCommandByName } from "src/services/Commands";
 import { LinkedFolder } from "src/services/OpenFolder";
+import { useSettings } from "./PluginContext";
 import {
 	GroupViewType,
 	identifyGroupViewType,
@@ -95,6 +96,7 @@ interface ViewState {
 	groupTitles: GroupTitles;
 	hiddenGroups: Array<Identifier>;
 	collapsedGroups: Array<Identifier>;
+	expandedGroups: Array<Identifier>;
 	nonEphemeralTabs: Array<Identifier>;
 	latestActiveLeaf: WorkspaceLeaf | null;
 	latestActiveTab: HTMLElement | null;
@@ -103,12 +105,8 @@ interface ViewState {
 	groupViewToggleEvents: GroupViewToggleEvents;
 	globalCollapseState: boolean;
 	isEditingTabs: boolean;
-	hasCtrlKeyPressed: boolean;
-	hasAltKeyPressed: boolean;
-	hasShiftEnterPressed: boolean;
-	viewCueOffset: number;
-	viewCueNativeCallbacks: ViewCueNativeCallbackMap;
-	viewCueFirstTabs: ViewCueFirstTabs;
+	memoizedCollapsedGroups: Array<Identifier>;
+	memoizedExpandedGroups: Array<Identifier>;
 	fGroups: FGroups;
 	activeFGroupId: string | null;
 	toggleFGroup: (fGroupId: string) => void;
@@ -130,7 +128,6 @@ interface ViewState {
 	resetFocusFlags: () => void;
 	hookLatestActiveTab: (tab: HTMLElement | null) => void;
 	scorllToActiveTab: () => void;
-	setShiftEnterState: (pressed: boolean) => void;
 	leftButtonClone: HTMLElement | null;
 	rightButtonClone: HTMLElement | null;
 	topLeftContainer: Element | null;
@@ -172,29 +169,6 @@ interface ViewState {
 		newLeaf: WorkspaceLeaf | null
 	) => boolean;
 	setIsEditingTabs: (app: App, isEditing: boolean) => void;
-	setCtrlKeyState: (isPressed: boolean) => void;
-	setAltKeyState: (isPressed: boolean) => void;
-	increaseViewCueOffset: () => void;
-	decreaseViewCueOffset: () => void;
-	resetViewCueOffset: () => void;
-	mapViewCueIndex(realIndex?: number, isLast?: boolean): ViewCueIndex;
-	convertBackToRealIndex(
-		userIndex: number,
-		numOfLeaves: number
-	): number | null;
-	revealTabOfUserIndex: (
-		app: App,
-		userIndex: number,
-		checking: boolean
-	) => boolean | void;
-	modifyViewCueCallback: (app: App) => void;
-	resetViewCueCallback: (app: App) => void;
-	registerViewCueTab: (
-		leaf: WorkspaceLeaf,
-		tab: HTMLElement | null,
-		isFirst: boolean
-	) => void;
-	scorllToViewCueFirstTab: (app: App) => void;
 	addLinkedGroup: (groupID: Identifier, linkedFolder: LinkedFolder) => void;
 	removeLinkedGroup: (group: WorkspaceParent) => void;
 	getLinkedFolder: (groupID: Identifier) => LinkedFolder | null;
@@ -211,6 +185,18 @@ interface ViewState {
 	getGroupByTabId: (tabId: string) => FGroup | null;
 	copyFGroupMembership: (sourceGroupId: string, targetGroupId: string) => void;
 	swapFGroupSubgroups: (app: App) => void;
+	getNextSubgroupId: (fGroupId: string, currentSubgroupId: string) => string | null;
+	resetSubgroups: () => void;
+	// Recent subgroup tracking for quick switching
+	recentSubgroupIds: Map<string, string[]>; // fGroupId -> [mostRecent, secondMostRecent]
+	updateRecentSubgroup: (fGroupId: string, subgroupId: string) => void;
+	switchToRecentSubgroup: (app: App) => void;
+	cycleSubgroupsInFGroup: (app: App) => void;
+	// Recent FGroup tracking for quick switching
+	recentFGroupIds: string[]; // [mostRecent, secondMostRecent]
+	updateRecentFGroup: (fGroupId: string) => void;
+	switchToRecentFGroup: () => void;
+	cycleFGroups: () => void;
 }
 
 const saveViewState = (titles: GroupTitles) => {
@@ -241,6 +227,16 @@ const saveCollapsedGroups = (collapsedGroups: Array<Identifier>) => {
 
 const loadCollapsedGroups = (): Array<Identifier> => {
 	const data = localStorage.getItem("collapsed-groups");
+	if (!data) return [];
+	return JSON.parse(data);
+};
+
+const saveExpandedGroups = (expandedGroups: Array<Identifier>) => {
+	localStorage.setItem("expanded-groups", JSON.stringify(expandedGroups));
+};
+
+const loadExpandedGroups = (): Array<Identifier> => {
+	const data = localStorage.getItem("expanded-groups");
 	if (!data) return [];
 	return JSON.parse(data);
 };
@@ -306,6 +302,7 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	groupTitles: loadViewState() ?? createNewGroupTitles(),
 	hiddenGroups: loadHiddenGroups(),
 	collapsedGroups: loadCollapsedGroups(),
+	expandedGroups: loadExpandedGroups(),
 	nonEphemeralTabs: loadNonEphemeralTabs(),
 	latestActiveLeaf: null,
 	latestActiveTab: null,
@@ -314,14 +311,12 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	groupViewToggleEvents: createNewGroupViewToggleEvents(),
 	globalCollapseState: false,
 	isEditingTabs: false,
-	hasCtrlKeyPressed: false,
-	hasAltKeyPressed: false,
-	hasShiftEnterPressed: false,
-	viewCueOffset: 0,
-	viewCueNativeCallbacks: new Map(),
-	viewCueFirstTabs: createNewViewCueFirstTabs(),
+	memoizedCollapsedGroups: [],
+	memoizedExpandedGroups: [],
 	fGroups: loadTabGroups(),
 	activeFGroupId: null,
+	recentSubgroupIds: new Map(),
+	recentFGroupIds: [],
 	linkedGroups: createNewLinkedGroups(),
 	leftButtonClone: null,
 	rightButtonClone: null,
@@ -348,17 +343,18 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	toggleCollapsedGroup: (id: Identifier, isCollapsed: boolean) => {
 		if (isCollapsed) {
 			set((state) => ({
-				collapsedGroups: [...state.collapsedGroups, id],
+				collapsedGroups: Array.from(new Set([...state.collapsedGroups, id])),
+				expandedGroups: state.expandedGroups.filter((gid) => gid !== id),
 			}));
 		} else {
 			set((state) => ({
-				collapsedGroups: state.collapsedGroups.filter(
-					(gid) => gid !== id
-				),
+				collapsedGroups: state.collapsedGroups.filter((gid) => gid !== id),
+				expandedGroups: Array.from(new Set([...state.expandedGroups, id])),
 				globalCollapseState: false,
 			}));
 		}
 		saveCollapsedGroups(get().collapsedGroups);
+		saveExpandedGroups(get().expandedGroups);
 	},
 	rememberNonephemeralTab(app: App, id: Identifier) {
 		const { nonEphemeralTabs } = get();
@@ -402,7 +398,17 @@ export const useViewState = create<ViewState>()((set, get) => ({
 			newActiveLeaf
 		);
 		// Focus has been moved to another group, we lock on the new group
-		if (groupChanged) get().lockFocus(plugin);
+		if (groupChanged) {
+			get().lockFocus(plugin);
+			// Update recent subgroup tracking when switching to a different subgroup
+			const { activeFGroupId } = get();
+			if (activeFGroupId && newActiveLeaf) {
+				const newParent = (newActiveLeaf as any).parent;
+				if (newParent && newParent.id) {
+					get().updateRecentSubgroup(activeFGroupId, newParent.id);
+				}
+			}
+		}
 	},
 	checkIfGroupChanged(
 		workspace: Workspace,
@@ -646,12 +652,213 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	},
 	setAllCollapsed() {
 		const ids = tabCacheStore.getState().groupIDs;
-		set({ globalCollapseState: true, collapsedGroups: ids });
-		saveCollapsedGroups(ids);
+		const { collapseSubgroupsByDefault } = useSettings.getState();
+
+		if (collapseSubgroupsByDefault) {
+			set({ globalCollapseState: true, expandedGroups: [] });
+			saveExpandedGroups([]);
+		} else {
+			set({ globalCollapseState: true, collapsedGroups: ids });
+			saveCollapsedGroups(ids);
+		}
 	},
 	setAllExpanded() {
-		set({ globalCollapseState: false, collapsedGroups: [] });
-		saveCollapsedGroups([]);
+		const ids = tabCacheStore.getState().groupIDs;
+		const { collapseSubgroupsByDefault } = useSettings.getState();
+
+		if (collapseSubgroupsByDefault) {
+			set({ globalCollapseState: false, expandedGroups: ids });
+			saveExpandedGroups(ids);
+		} else {
+			set({ globalCollapseState: false, collapsedGroups: [] });
+			saveCollapsedGroups([]);
+		}
+	},
+	resetSubgroups() {
+		const {
+			collapsedGroups,
+			expandedGroups,
+			memoizedCollapsedGroups,
+			memoizedExpandedGroups,
+			globalCollapseState,
+		} = get();
+		const ids = tabCacheStore.getState().groupIDs;
+		const { collapseSubgroupsByDefault } = useSettings.getState();
+
+		if (globalCollapseState) {
+			// Restore to memoized state
+			if (collapseSubgroupsByDefault) {
+				set({
+					globalCollapseState: false,
+					expandedGroups: memoizedExpandedGroups.length
+						? memoizedExpandedGroups
+						: [],
+				});
+				saveExpandedGroups(get().expandedGroups);
+			} else {
+				set({
+					globalCollapseState: false,
+					collapsedGroups: memoizedCollapsedGroups.length
+						? memoizedCollapsedGroups
+						: [],
+				});
+				saveCollapsedGroups(get().collapsedGroups);
+			}
+		} else {
+			// Memoize current and collapse all
+			if (collapseSubgroupsByDefault) {
+				set({
+					globalCollapseState: true,
+					memoizedExpandedGroups: expandedGroups,
+					expandedGroups: [],
+				});
+				saveExpandedGroups([]);
+			} else {
+				set({
+					globalCollapseState: true,
+					memoizedCollapsedGroups: collapsedGroups,
+					collapsedGroups: ids,
+				});
+				saveCollapsedGroups(ids);
+			}
+		}
+	},
+	// Update recent subgroup tracking when switching subgroups
+	updateRecentSubgroup(fGroupId: string, subgroupId: string) {
+		const { recentSubgroupIds } = get();
+		const currentRecent = recentSubgroupIds.get(fGroupId) || [];
+		
+		// Don't update if it's already the most recent
+		if (currentRecent[0] === subgroupId) return;
+		
+		// Update: new most recent, previous most recent becomes second
+		const newRecent = [subgroupId, currentRecent[0]].filter(Boolean) as string[];
+		recentSubgroupIds.set(fGroupId, newRecent);
+		set({ recentSubgroupIds });
+	},
+	// Switch between the two most recent subgroups (like Ctrl+Tab)
+	switchToRecentSubgroup(app: App) {
+		const { activeFGroupId, recentSubgroupIds, fGroups } = get();
+		if (!activeFGroupId) return;
+		
+		const fGroup = fGroups[activeFGroupId];
+		if (!fGroup || fGroup.groupIds.length < 2) return;
+		
+		const recent = recentSubgroupIds.get(activeFGroupId) || [];
+		if (recent.length < 2) return;
+		
+		const [mostRecent, secondMostRecent] = recent;
+		
+		// Find the subgroup to switch to (the one that's not currently active)
+		const activeLeaf = app.workspace.activeLeaf;
+		if (!activeLeaf) return;
+		
+		const currentParent = (activeLeaf as any).parent;
+		if (!currentParent || !currentParent.id) return;
+		
+		const currentSubgroupId = currentParent.id;
+		const targetSubgroupId = currentSubgroupId === mostRecent ? secondMostRecent : mostRecent;
+		
+		if (!targetSubgroupId || !fGroup.groupIds.includes(targetSubgroupId)) return;
+		
+		// Find a leaf in the target subgroup and activate it
+		const allLeaves = app.workspace.getLeavesOfType('markdown');
+		for (const leaf of allLeaves) {
+			const parent = (leaf as any).parent;
+			if (parent && parent.id === targetSubgroupId) {
+				// Update recent tracking before switching
+				get().updateRecentSubgroup(activeFGroupId, targetSubgroupId);
+				app.workspace.setActiveLeaf(leaf, { focus: true });
+				return;
+			}
+		}
+	},
+	// Cycle through all subgroups in current FGroup
+	cycleSubgroupsInFGroup(app: App) {
+		const { activeFGroupId, fGroups } = get();
+		if (!activeFGroupId) return;
+		
+		const fGroup = fGroups[activeFGroupId];
+		if (!fGroup || fGroup.groupIds.length === 0) return;
+		
+		const activeLeaf = app.workspace.activeLeaf;
+		if (!activeLeaf) return;
+		
+		const currentParent = (activeLeaf as any).parent;
+		if (!currentParent || !currentParent.id) return;
+		
+		const currentSubgroupId = currentParent.id;
+		const subgroupIds = fGroup.groupIds;
+		
+		const currentIndex = subgroupIds.indexOf(currentSubgroupId);
+		if (currentIndex === -1) return;
+		
+		// Calculate next index with wrap-around
+		const nextIndex = (currentIndex + 1) % subgroupIds.length;
+		const targetSubgroupId = subgroupIds[nextIndex];
+		
+		// Find a leaf in the target subgroup and activate it
+		const allLeaves = app.workspace.getLeavesOfType('markdown');
+		for (const leaf of allLeaves) {
+			const parent = (leaf as any).parent;
+			if (parent && parent.id === targetSubgroupId) {
+				// Update recent tracking before switching
+				get().updateRecentSubgroup(activeFGroupId, targetSubgroupId);
+				app.workspace.setActiveLeaf(leaf, { focus: true });
+				return;
+			}
+		}
+	},
+	// Update recent FGroup tracking when switching FGroups
+	updateRecentFGroup(fGroupId: string) {
+		const { recentFGroupIds } = get();
+		
+		// Don't update if it's already the most recent
+		if (recentFGroupIds[0] === fGroupId) return;
+		
+		// Update: new most recent, previous most recent becomes second
+		const newRecent = [fGroupId, recentFGroupIds[0]].filter(Boolean) as string[];
+		set({ recentFGroupIds: newRecent });
+	},
+	// Switch between the two most recent FGroups (like Alt+Tab)
+	switchToRecentFGroup() {
+		const { recentFGroupIds, fGroups, activeFGroupId, toggleFGroup } = get();
+		
+		if (recentFGroupIds.length < 2) return;
+		
+		const [mostRecent, secondMostRecent] = recentFGroupIds;
+		
+		// Find the FGroup to switch to (the one that's not currently active)
+		const targetFGroupId = activeFGroupId === mostRecent ? secondMostRecent : mostRecent;
+		
+		if (!targetFGroupId || !fGroups[targetFGroupId]) return;
+		
+		// Update recent tracking before switching
+		get().updateRecentFGroup(targetFGroupId);
+		
+		// Toggle to the target FGroup
+		toggleFGroup(targetFGroupId);
+	},
+	// Cycle through all FGroups
+	cycleFGroups() {
+		const { fGroups, activeFGroupId, toggleFGroup } = get();
+		
+		const fGroupIds = Object.keys(fGroups);
+		if (fGroupIds.length === 0) return;
+		
+		const currentIndex = activeFGroupId ? fGroupIds.indexOf(activeFGroupId) : -1;
+		
+		// Calculate next index with wrap-around
+		const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % fGroupIds.length;
+		const targetFGroupId = fGroupIds[nextIndex];
+		
+		if (!targetFGroupId || !fGroups[targetFGroupId]) return;
+		
+		// Update recent tracking before switching
+		get().updateRecentFGroup(targetFGroupId);
+		
+		// Toggle to the target FGroup
+		toggleFGroup(targetFGroupId);
 	},
 	uncollapseActiveGroup(app: App) {
 		const { latestActiveLeaf } = get();
@@ -700,179 +907,26 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		}
 		set({ isEditingTabs: isEditing });
 	},
-	setCtrlKeyState(isPressed: boolean) {
-		set({ hasCtrlKeyPressed: isPressed });
-		if (!isPressed) get().resetViewCueOffset();
-	},
-	setAltKeyState(isPressed: boolean) {
-		set({ hasAltKeyPressed: isPressed });
-	},
-	setShiftEnterState(isPressed: boolean) {
-		set({ hasShiftEnterPressed: isPressed });
-	},
-	increaseViewCueOffset: debounce(() => {
-		const { viewCueOffset, latestActiveLeaf } = get();
-		if (latestActiveLeaf) {
-			const latestParent = latestActiveLeaf.parent;
-			const numOfLeaves = latestParent.children.length;
-			const maxOffset = Math.floor((numOfLeaves - 1) / MAX_INDEX_KEY);
-			set({ viewCueOffset: Math.min(maxOffset, viewCueOffset + 1) });
-		} else {
-			set({ viewCueOffset: viewCueOffset + 1 });
-		}
-	}, REFRESH_TIMEOUT_LONG),
-	decreaseViewCueOffset: debounce(() => {
-		const { viewCueOffset } = get();
-		set({ viewCueOffset: Math.max(0, viewCueOffset - 1) });
-	}, REFRESH_TIMEOUT_LONG),
-	resetViewCueOffset() {
-		set({ viewCueOffset: 0 });
-	},
+	setCtrlKeyState(isPressed: boolean) {},
+	setAltKeyState(isPressed: boolean) {},
+	setShiftKeyState(isPressed: boolean) {},
+	setLinkThrowingState(isThrowing: boolean) {},
+	increaseViewCueOffset: debounce(() => {}, REFRESH_TIMEOUT_LONG),
+	decreaseViewCueOffset: debounce(() => {}, REFRESH_TIMEOUT_LONG),
+	resetViewCueOffset() {},
 	mapViewCueIndex(realIndex?: number, isLast?: boolean): ViewCueIndex {
-		if (realIndex === undefined) return undefined;
-		const { viewCueOffset } = get();
-		const userIndex = realIndex - viewCueOffset * MAX_INDEX_KEY;
-		if (MIN_INDEX_KEY <= userIndex && userIndex <= MAX_INDEX_KEY) {
-			return userIndex;
-		} else if (isLast) {
-			return LAST_INDEX_KEY;
-		} else if (userIndex === MAX_INDEX_KEY + 1) {
-			return VIEW_CUE_NEXT;
-		} else if (userIndex === MIN_INDEX_KEY - 1) {
-			return VIEW_CUE_PREV;
-		}
+		return undefined;
 	},
-	convertBackToRealIndex(
-		userIndex: number,
-		numOfLeaves: number
-	): number | null {
-		const { viewCueOffset } = get();
-		const realIndex = userIndex + viewCueOffset * MAX_INDEX_KEY;
-		if (MIN_INDEX_KEY <= realIndex && realIndex <= numOfLeaves) {
-			return realIndex;
-		} else {
-			return null;
-		}
+	convertBackToRealIndex(userIndex: number, numOfLeaves: number): number | null {
+		return null;
 	},
-	revealTabOfUserIndex(
-		app: App,
-		userIndex: number,
-		checking: boolean
-	): boolean | void {
-		const { latestActiveLeaf, viewCueNativeCallbacks } = get();
-		if (latestActiveLeaf) {
-			const latestParent = latestActiveLeaf.parent;
-			const numOfLeaves = latestParent.children.length;
-			const realIndex = get().convertBackToRealIndex(
-				userIndex,
-				numOfLeaves
-			);
-			if (!realIndex) return;
-			const target = latestParent.children[realIndex - 1];
-			if (!target) return;
-			if (checking) return true;
-			set({ latestActiveLeaf: target });
-			app.workspace.setActiveLeaf(target, { focus: true });
-			const viewType = identifyGroupViewType(target.parent);
-			if (viewType === GroupViewType.MissionControlView) {
-				setGroupViewType(target.parent, GroupViewType.Default);
-			}
-		} else {
-			// Prevent infinite recursion by using a guard
-			if (callbackGuard.has(userIndex)) return false;
-			const defaultCallback = viewCueNativeCallbacks.get(userIndex);
-			if (defaultCallback) {
-				callbackGuard.add(userIndex);
-				try {
-					return defaultCallback(checking);
-				} finally {
-					callbackGuard.delete(userIndex);
-				}
-			}
-		}
+	revealTabOfUserIndex(app: App, userIndex: number, checking: boolean): boolean | void {
+		return false;
 	},
-	modifyViewCueCallback(app: App) {
-		const nativeCallbacks: ViewCueNativeCallbackMap = new Map();
-		for (let index = 1; index < MAX_INDEX_KEY; index++) {
-			const commandName = `workspace:goto-tab-${index}`;
-			const command = getCommandByName(app, commandName);
-			const callback = command?.checkCallback;
-			if (command && callback) {
-				nativeCallbacks.set(index, callback);
-				command.checkCallback = (checking: boolean) => {
-					return get().revealTabOfUserIndex(app, index, checking);
-				};
-			}
-		}
-		set({ viewCueNativeCallbacks: nativeCallbacks });
-	},
-	resetViewCueCallback(app: App) {
-		const { viewCueNativeCallbacks } = get();
-		for (const [index, callback] of viewCueNativeCallbacks) {
-			const commandName = `workspace:goto-tab-${index}`;
-			const command = getCommandByName(app, commandName);
-			if (command) {
-				command.checkCallback = callback;
-			}
-		}
-	},
-	registerViewCueTab(
-		leaf: WorkspaceLeaf,
-		tab: HTMLElement | null,
-		isFirst: boolean
-	) {
-		const { viewCueFirstTabs } = get();
-		if (isFirst && tab) viewCueFirstTabs.set(leaf.id, tab);
-		else viewCueFirstTabs.delete(leaf.id);
-		set({ viewCueFirstTabs });
-	},
-	scorllToViewCueFirstTab(app: App) {
-		const { latestActiveLeaf, viewCueFirstTabs } = get();
-		let targetTab: HTMLElement | null = null;
-		let targetLeaf: WorkspaceLeaf | null = null;
-		if (!latestActiveLeaf && viewCueFirstTabs.size === 1) {
-			// If latestActiveLeaf is not set and viewCueFirstTabs has only one entry,
-			// we should scroll to that tab
-			const firstEntry = viewCueFirstTabs.entries().next().value;
-			if (!firstEntry) return; // should never happen
-			const [id, tab] = firstEntry;
-			targetTab = tab;
-			targetLeaf = app.workspace.getLeafById(id);
-		} else if (latestActiveLeaf) {
-			// If latestActiveLeaf is set, we should scroll to the tab that has the
-			// same parent as the latestActiveLeaf
-			const activeGroup = latestActiveLeaf.parent;
-			if (!activeGroup) return;
-			for (const [id, tab] of viewCueFirstTabs) {
-				const leaf = app.workspace.getLeafById(id);
-				if (!leaf || !tab || !leaf.parent) continue;
-				if (activeGroup.id === leaf.parent.id) {
-					targetTab = tab;
-					targetLeaf = leaf;
-					break;
-				}
-			}
-		}
-		if (targetTab) {
-			targetTab.scrollIntoView({
-				behavior: "smooth",
-				block: "start",
-				inline: "nearest",
-			});
-		}
-		if (targetLeaf) {
-			targetLeaf.tabHeaderEl.scrollIntoView({
-				behavior: "smooth",
-				block: "start",
-				inline: "start",
-			});
-			targetLeaf.containerEl.scrollIntoView({
-				behavior: "smooth",
-				block: "start",
-				inline: "start",
-			});
-		}
-	},
+	modifyViewCueCallback(app: App) {},
+	resetViewCueCallback(app: App) {},
+	registerViewCueTab(leaf: WorkspaceLeaf, tab: HTMLElement | null, isFirst: boolean) {},
+	scorllToViewCueFirstTab(app: App) {},
 	addLinkedGroup(groupID: Identifier, linkedFolder: LinkedFolder) {
 		const { linkedGroups } = get();
 		linkedGroups.set(groupID, linkedFolder);
@@ -942,27 +996,27 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		const { fGroups } = get();
 		const fGroup = fGroups[fGroupId];
 		if (!fGroup) return;
-		
+
 		if (fGroup.groupIds.includes(groupId)) return;
-		
+
 		const newFGroups = { ...fGroups };
 		newFGroups[fGroupId] = {
 			...fGroup,
 			groupIds: [...fGroup.groupIds, groupId],
 		};
-		
+
 		set({ fGroups: newFGroups });
 		saveTabGroups(newFGroups);
 	},
 	removeGroupFromFGroup(groupId: string, fGroupId?: string) {
 		const { fGroups } = get();
-		
+
 		if (fGroupId) {
 			const fGroup = fGroups[fGroupId];
 			if (!fGroup) return;
-			
+
 			const newGroupIds = fGroup.groupIds.filter((id) => id !== groupId);
-			
+
 			if (newGroupIds.length === 0) {
 				const newFGroups = { ...fGroups };
 				delete newFGroups[fGroupId];
@@ -984,13 +1038,13 @@ export const useViewState = create<ViewState>()((set, get) => ({
 					containingFGroupIds.push(fgId);
 				}
 			}
-			
+
 			if (containingFGroupIds.length === 0) return;
-			
+
 			const targetFGroupId = containingFGroupIds[0];
 			const fGroup = fGroups[targetFGroupId];
 			const newGroupIds = fGroup.groupIds.filter((id) => id !== groupId);
-			
+
 			if (newGroupIds.length === 0) {
 				const newFGroups = { ...fGroups };
 				delete newFGroups[targetFGroupId];
@@ -1018,10 +1072,10 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		const { fGroups } = get();
 		const group = fGroups[groupId];
 		if (!group) return;
-		
+
 		const newFGroups = { ...fGroups };
 		newFGroups[groupId] = { ...group, isHidden };
-		
+
 		set({ fGroups: newFGroups });
 		saveTabGroups(newFGroups);
 	},
@@ -1065,13 +1119,16 @@ export const useViewState = create<ViewState>()((set, get) => ({
 		}
 
 		// 更新状态
-		set({ 
+		set({
 			activeFGroupId: fGroupId,
 			hiddenGroups: newHiddenGroups
 		});
-		
+
 		// 保存状态
 		saveHiddenGroups(newHiddenGroups);
+
+		// 更新最近访问的FGroup记录
+		get().updateRecentFGroup(fGroupId);
 	},
 	getAllFGroups: () => {
 		const { fGroups } = get();
@@ -1105,12 +1162,12 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	},
 	copyFGroupMembership: (sourceGroupId: string, targetGroupId: string) => {
 		if (!sourceGroupId || !targetGroupId) return;
-		
+
 		const { fGroups } = get();
 		const containingFGroups = Object.values(fGroups).filter(
 			(fGroup) => fGroup.groupIds.includes(sourceGroupId)
 		);
-		
+
 		containingFGroups.forEach((fGroup) => {
 			if (!fGroup.groupIds.includes(targetGroupId)) {
 				const newFGroups = { ...fGroups };
@@ -1125,57 +1182,68 @@ export const useViewState = create<ViewState>()((set, get) => ({
 	},
 	swapFGroupSubgroups: (app: App) => {
 		const { fGroups, activeFGroupId } = get();
-		
+
 		if (!activeFGroupId) return;
-		
+
 		const activeFGroup = fGroups[activeFGroupId];
 		if (!activeFGroup) return;
-		
+
 		if (activeFGroup.groupIds.length < 2) return;
-		
+
 		// 轮询逻辑：将最后一个子组移动到第一个位置
 		const newGroupIds = [...activeFGroup.groupIds];
 		const lastGroupId = newGroupIds.pop();
 		if (lastGroupId) {
 			newGroupIds.unshift(lastGroupId);
 		}
-		
+
 		// 更新状态
 		const newFGroups = { ...fGroups };
 		newFGroups[activeFGroupId] = {
 			...activeFGroup,
 			groupIds: newGroupIds,
 		};
-		
+
 		set({ fGroups: newFGroups });
 		saveTabGroups(newFGroups);
-		
+
 		// 重新排列实际的 DOM 和内部数组顺
 		reorderFGroupChildren(app, newGroupIds);
-		
+
 		// 触发UI显隐状态更新
 		get().toggleFGroup(activeFGroupId);
-		
+
 		// 关键：强制刷新布局样式，重新计算宽度
 		setTimeout(() => {
 			autoResizeLayout(app);
 		}, 50);
+	},
+	getNextSubgroupId: (fGroupId: string, currentSubgroupId: string) => {
+		const { fGroups } = get();
+		const fGroup = fGroups[fGroupId];
+		if (!fGroup || fGroup.groupIds.length < 2) return null;
+
+		const index = fGroup.groupIds.indexOf(currentSubgroupId);
+		if (index === -1) return null;
+
+		const nextIndex = (index + 1) % fGroup.groupIds.length;
+		return fGroup.groupIds[nextIndex];
 	},
 }));
 
 function reorderFGroupChildren(app: App, groupIds: string[]) {
 	const workspace = app.workspace;
 	const rootSplit = workspace.rootSplit;
-	
+
 	if (!rootSplit) return;
-	
+
 	function reorderInSplit(split: any) {
 		const splitEl = split.containerEl;
 		if (!splitEl) return;
-		
+
 		const children = split.children as any[];
 		const visibleMatching = children.filter(child => groupIds.includes(child.id));
-		
+
 		// 如果当前 split 下含有两个或以上属于该 F 组的子组，进行重排
 		if (visibleMatching.length >= 2) {
 			// 按 groupIds 的新顺序筛选出这些子组
@@ -1190,14 +1258,14 @@ function reorderFGroupChildren(app: App, groupIds: string[]) {
 					split.children.splice(currentIndex, 1);
 					split.children.push(child);
 				}
-				
+
 				// 2. 同步物理 DOM：使用 appendChild 移动元素位置
 				if (child.containerEl && splitEl) {
 					splitEl.appendChild(child.containerEl);
 				}
 			});
 		}
-		
+
 		// 递归处理嵌套的 split
 		children.forEach(child => {
 			if (child.children && child.containerEl) {
@@ -1205,7 +1273,7 @@ function reorderFGroupChildren(app: App, groupIds: string[]) {
 			}
 		});
 	}
-	
+
 	reorderInSplit(rootSplit);
 	workspace.onLayoutChange();
 }

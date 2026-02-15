@@ -65,8 +65,6 @@ export const NavigationContent = () => {
 		const isActiveTab = (active.data.current as any).isTab;
 		const isOverTab = (over.data.current as any).isTab;
 		const isOverFGroup = (over.data.current as any).isFGroup;
-		const isCtrlPressed = (event.activatorEvent as MouseEvent)?.ctrlKey || (event.activatorEvent as MouseEvent)?.metaKey;
-
 		if (isActiveTab) {
 			let movedTab: WorkspaceLeaf | null = null;
 			if (isOverTab) {
@@ -101,21 +99,17 @@ export const NavigationContent = () => {
 				const fGroup = fGroups[overID];
 				if (!fGroup) return;
 				
-				if (isCtrlPressed) {
+				const containingFGroups = Object.values(fGroups).filter(
+					(fg) => fg.groupIds.includes(activeID)
+				);
+				
+				if (containingFGroups.length === 0) {
 					addGroupToFGroup(activeID, overID);
-				} else {
-					const containingFGroups = Object.values(fGroups).filter(
-						(fg) => fg.groupIds.includes(activeID)
-					);
-					
-					if (containingFGroups.length === 0) {
-						addGroupToFGroup(activeID, overID);
-					} else if (!containingFGroups.find((fg) => fg.id === overID)) {
-						containingFGroups.forEach((fg) => {
-							removeGroupFromFGroup(activeID, fg.id);
-						});
-						addGroupToFGroup(activeID, overID);
-					}
+				} else if (!containingFGroups.find((fg) => fg.id === overID)) {
+					containingFGroups.forEach((fg) => {
+						removeGroupFromFGroup(activeID, fg.id);
+					});
+					addGroupToFGroup(activeID, overID);
 				}
 			} else {
 				if (overID === "slot-new") {

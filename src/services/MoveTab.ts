@@ -20,31 +20,6 @@ export function reapplyEphemeralState(
 	}, REFRESH_TIMEOUT_LONG);
 }
 
-function removeChild(parent: WorkspaceParent, index: number) {
-	parent.children.splice(index, 1);
-	if (parent.children.length === 0) {
-		parent.detach();
-	} else {
-		parent.selectTabIndex(Math.max(0, index - 1));
-	}
-	parent.recomputeChildrenDimensions();
-}
-
-function insertChild(
-	parent: WorkspaceParent,
-	leaf: WorkspaceLeaf,
-	index: number | null = null
-) {
-	if (index === null) {
-		parent.children.push(leaf);
-	} else {
-		parent.children.splice(index, 0, leaf);
-	}
-	leaf.setParent(parent);
-	parent.selectTab(leaf);
-	parent.recomputeChildrenDimensions();
-}
-
 export function moveTab(
 	app: App,
 	sourceID: Identifier,
@@ -64,9 +39,7 @@ export function moveTab(
 			? targetIndex - 1
 			: targetIndex;
 	sourceParent.removeChild(sourceLeaf);
-	sourceLeaf.setDimension(null);
 	targetParent.insertChild(insertIndex, sourceLeaf);
-	targetParent.selectTabIndex(insertIndex);
 	app.workspace.requestResize();
 	syncUIForGroupView(sourceParent);
 	syncUIForGroupView(targetParent);
@@ -81,9 +54,11 @@ export function moveTabToEnd(
 	const sourceLeaf = app.workspace.getLeafById(sourceID);
 	if (!sourceLeaf) return null;
 	const sourceParent = sourceLeaf.parent;
-	const sourceIndex = sourceParent.children.indexOf(sourceLeaf);
-	removeChild(sourceParent, sourceIndex);
-	insertChild(targetParent, sourceLeaf);
+
+	// Use native Obsidian methods
+	sourceParent.removeChild(sourceLeaf);
+	targetParent.insertChild(targetParent.children.length, sourceLeaf);
+
 	app.workspace.onLayoutChange();
 	reapplyEphemeralState(sourceLeaf);
 	return sourceLeaf;

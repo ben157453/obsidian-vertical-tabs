@@ -11,7 +11,7 @@ import {
 	closeTabsToTopInGroup,
 } from "src/services/CloseTabs";
 import { tabCacheStore } from "src/stores/TabCacheStore";
-import { useViewState, VIEW_CUE_PREV } from "src/models/ViewState";
+import { useViewState } from "src/models/ViewState";
 import { DeduplicatedTitle } from "src/services/DeduplicateTitle";
 import {
 	createBookmarkForLeaf,
@@ -64,8 +64,6 @@ export const Tab = (props: TabProps) => {
 		lockFocusOnLeaf,
 		toggleHiddenGroup,
 		hookLatestActiveTab,
-		mapViewCueIndex,
-		registerViewCueTab,
 	} = useViewState();
 
 	/* Relevant settings */
@@ -88,13 +86,11 @@ export const Tab = (props: TabProps) => {
 
 	/* Store states (managed by zustand, shared by components) */
 	const lastActiveLeaf = useViewState((state) => state.latestActiveLeaf);
-	const hasAltKeyPressed = useViewState((state) => state.hasAltKeyPressed);
 
 	/* Derived states */
 	const isActiveTab = lastActiveLeaf?.id === leaf.id;
-	const viewCueIndex = mapViewCueIndex(index, isLast);
 	const title = volatileTitle ?? DeduplicatedTitle(app, leaf);
-	const shouldShowHandle = isHovered && hasAltKeyPressed;
+	const shouldShowHandle = isHovered;
 
 	/* Commands */
 	/* Commands - Tab control */
@@ -291,29 +287,7 @@ export const Tab = (props: TabProps) => {
 	useEffect(() => {
 		if (isActiveTab) hookLatestActiveTab(ref.current);
 	}, [isActiveTab, ref]);
-	// Update view cue system for keyboard navigation and visual indicators
-	useEffect(() => {
-		// Determine if this is the first tab for navigation purposes
-		const isFirstTab =
-			viewCueIndex === VIEW_CUE_PREV ||
-			(viewCueIndex === index && index === 1);
-		// Register this tab with the view state store for navigation tracking
-		registerViewCueTab(leaf, ref.current, isFirstTab);
-		// Update the native Obsidian tab header with index data for styling/navigation
-		if (leaf.tabHeaderInnerTitleEl) {
-			if (viewCueIndex) {
-				leaf.tabHeaderInnerTitleEl.dataset.index =
-					viewCueIndex.toString();
-			} else {
-				delete leaf.tabHeaderInnerTitleEl.dataset.index;
-			}
-		}
-		if (viewCueIndex) {
-			leaf.containerEl.dataset.index = viewCueIndex.toString();
-		} else {
-			delete leaf.containerEl.dataset.index;
-		}
-	}, [viewCueIndex, ref]);
+
 	// Replace the default navigation buttons with our own
 	useEffect(() => cloneNavButtons(leaf, app), [leaf.id, leaf.view]);
 
@@ -655,7 +629,7 @@ export const Tab = (props: TabProps) => {
 			<NavigationTreeItem
 				ref={ref}
 				id={leaf.id}
-				index={viewCueIndex}
+				index={index}
 				title={title}
 				isTab={true}
 				isEphemeralTab={isEphemeral && !isPinned}

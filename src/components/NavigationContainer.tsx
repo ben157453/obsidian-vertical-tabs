@@ -50,13 +50,6 @@ export const NavigationContainer = () => {
 		lockFocus,
 		forgetNonephemeralTabs,
 		uncollapseActiveGroup,
-		setCtrlKeyState,
-		setAltKeyState,
-		increaseViewCueOffset,
-		decreaseViewCueOffset,
-		modifyViewCueCallback,
-		resetViewCueCallback,
-		scorllToViewCueFirstTab,
 		setIsEditingTabs,
 		setGroupViewTypeForCurrentGroup,
 		exitMissionControlForCurrentGroup,
@@ -67,8 +60,7 @@ export const NavigationContainer = () => {
 	const dragInProgress = useRef(false);
 	const draggedLeaf = useRef<Element | null>(null);
 
-	// Alt key timeout reference to allow cancellation
-	const altKeyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
 	// Reference to track previous group IDs for detecting new groups
 	const previousGroupIdsRef = useRef<string[]>([]);
 
@@ -241,7 +233,6 @@ export const NavigationContainer = () => {
 		const workspace = app.workspace;
 		loadSettings(plugin).then((settings) => {
 			if (settings.ephemeralTabs) initEphemeralTabs(app);
-			if (settings.enhancedKeyboardTabSwitch) modifyViewCueCallback(app);
 			if (settings.backgroundMode) moveSelfToNewGroupAndHide(app);
 		});
 		autoRefresh();
@@ -298,71 +289,8 @@ export const NavigationContainer = () => {
 				}
 			})
 		);
-		plugin.registerEvent(
-			workspace.on(EVENTS.ENHANCED_KEYBOARD_TAB_SWITCH, () => {
-				modifyViewCueCallback(app);
-			})
-		);
-		plugin.registerEvent(
-			workspace.on(EVENTS.RESET_KEYBOARD_TAB_SWITCH, () => {
-				resetViewCueCallback(app);
-			})
-		);
-		plugin.registerDomEvent(window, "keydown", (event) => {
-			if (event.key === "Escape") {
-				exitMissionControlForCurrentGroup();
-			}
-			if (event.altKey) {
-				setAltKeyState(true);
-				// Clear any existing timeout to prevent old resets
-				if (altKeyTimeoutRef.current) {
-					clearTimeout(altKeyTimeoutRef.current);
-				}
-				// Set new timeout and store reference
-				altKeyTimeoutRef.current = setTimeout(
-					() => setAltKeyState(false),
-					ALT_KEY_EFFECT_DURATION
-				);
-			}
-			const { enhancedKeyboardTabSwitch } = useSettings.getState();
-			if (!enhancedKeyboardTabSwitch) return;
-			if (
-				(event.ctrlKey || event.metaKey) &&
-				(event.key === "Control" ||
-					event.key === "Meta" ||
-					event.key === "ArrowRight" ||
-					event.key === "ArrowLeft")
-			) {
-				setCtrlKeyState(true);
-				if (event.key === "ArrowRight") {
-					increaseViewCueOffset();
-				} else if (event.key === "ArrowLeft") {
-					decreaseViewCueOffset();
-				}
-				setTimeout(() => {
-					if (useViewState.getState().hasCtrlKeyPressed) {
-						ref.current?.toggleClass("tab-index-view-cue", true);
-						document.body.toggleClass(
-							"vt-tab-index-view-cue",
-							true
-						);
-						scorllToViewCueFirstTab(app);
-					}
-				}, VIEW_CUE_DELAY);
-				setTimeout(() => {
-					if (ref.current?.hasClass("tab-index-view-cue")) {
-						scorllToViewCueFirstTab(app);
-					}
-				}, REFRESH_TIMEOUT_LONG);
-			}
-		});
-		plugin.registerDomEvent(window, "keyup", (event) => {
-			if (event.key === "Control" || event.key === "Meta") {
-				setCtrlKeyState(false);
-				ref.current?.toggleClass("tab-index-view-cue", false);
-				document.body.toggleClass("vt-tab-index-view-cue", false);
-			}
-		});
+
+
 		plugin.registerDomEvent(document, "dblclick", (event) => {
 			makeDblclickedFileNonEphemeral(app, event);
 		});
@@ -484,11 +412,8 @@ export const NavigationContainer = () => {
 			display: "Vertical Tabs",
 		});
 
-		// Cleanup function to clear alt key timeout on unmount
+		// Cleanup function
 		return () => {
-			if (altKeyTimeoutRef.current) {
-				clearTimeout(altKeyTimeoutRef.current);
-			}
 		};
 	}, []);
 

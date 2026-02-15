@@ -64,10 +64,14 @@ export const Group = (props: GroupProps) => {
 
 	/* Relevant settings */
 	const hideSidebars = useSettings((state) => state.hideSidebars);
+	const collapseByDefault = useSettings(
+		(state) => state.collapseSubgroupsByDefault
+	);
 
 	/* Store states (managed by zustand, shared by components) */
 	const groupTitles = useViewState((state) => state.groupTitles);
 	const collapsedGroups = useViewState((state) => state.collapsedGroups);
+	const expandedGroups = useViewState((state) => state.expandedGroups);
 	const isHidden = useViewState(
 		(state) => !!group && state.hiddenGroups.includes(group.id)
 	);
@@ -84,9 +88,11 @@ export const Group = (props: GroupProps) => {
 	/* Derived states */
 	const isSidebar =
 		type === GroupType.LeftSidebar || type === GroupType.RightSidebar;
-	const isCollapsed =
-		(!!group && collapsedGroups.includes(group.id)) ||
-		(isSidebar && collapsedGroups.includes(type));
+	const id = isSidebar ? type : group?.id;
+	const isCollapsed = !!(collapseByDefault
+		? id && !expandedGroups.includes(id)
+		: (!!group && collapsedGroups.includes(group.id)) ||
+		(isSidebar && collapsedGroups.includes(type)));
 	const isSingleGroupInRoot = hasOnlyOneGroup() && !isSidebar && !!group;
 	const isSingleGroupInView = hideSidebars && isSingleGroupInRoot;
 	const isActiveGroup = group?.id === lastActiveLeaf?.parent?.id;
@@ -308,9 +314,9 @@ export const Group = (props: GroupProps) => {
 					const containingFGroups = Object.values(fGroups).filter(
 						(fGroup) => fGroup.groupIds.includes(group.id)
 					);
-					
+
 					if (containingFGroups.length === 0) return;
-					
+
 					if (containingFGroups.length === 1) {
 						removeGroupFromFGroup(group.id, containingFGroups[0].id);
 					} else {
@@ -342,11 +348,11 @@ export const Group = (props: GroupProps) => {
 						(fGroup) => !fGroup.groupIds.includes(group.id)
 					);
 					const fGroupOptions = availableFGroups.map((fGroup) => fGroup.name);
-					
+
 					if (fGroupOptions.length === 0) {
 						return;
 					}
-					
+
 					new FGroupSelectModal(app, fGroupOptions, (fGroupName) => {
 						if (!fGroupName || !group) return;
 						const targetFGroup = Object.values(fGroups).find(

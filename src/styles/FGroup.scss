@@ -55,9 +55,9 @@
 
 	&.is-active {
 		.tree-item-self {
-			background: linear-gradient(135deg, var(--interactive-accent) 0%, var(--interactive-accent-hover) 100%);
+			background: linear-gradient(135deg, var(--interactive-success) 0%, var(--color-green) 100%);
 			color: var(--text-on-accent);
-			border-left-color: var(--interactive-accent-hover);
+			border-left-color: var(--color-green);
 			border-left-width: 5px;
 			font-weight: 700;
 			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 3px rgba(0, 0, 0, 0.1);
@@ -79,6 +79,16 @@
 		.tree-item-inner-text {
 			color: var(--text-on-accent);
 			font-weight: 700;
+			position: relative;
+			padding-left: 16px;
+
+			&::before {
+				content: "●";
+				position: absolute;
+				left: 0;
+				color: var(--color-orange);
+				font-size: 12px;
+			}
 		}
 	}
 }
@@ -91,4 +101,127 @@
 
 .vt-tree-item.is-fgroup .vt-tree-item-title {
 	flex: 1;
+}
+
+// Subgroup indicators in navigation header
+.obsidian-vertical-tabs-toolbar .nav-buttons-container {
+	display: flex;
+	align-items: center;
+	width: 100%;
+}
+
+.subgroup-indicators {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+}
+
+.subgroup-indicator {
+	width: 24px;
+	height: 24px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	background-color: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: 11px;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s ease-in-out;
+	user-select: none;
+
+	&.is-active {
+		background-color: var(--interactive-accent);
+		color: var(--text-on-accent);
+		border-color: var(--interactive-accent);
+		box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+		font-weight: 700;
+	}
+
+	&.is-active-dimmed {
+		background-color: var(--interactive-accent);
+		color: var(--text-on-accent);
+		border-color: var(--interactive-accent);
+		box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+		font-weight: 700;
+		filter: brightness(0.5);
+		opacity: 0.7;
+	}
+
+	&.fgroup-indicator {
+		background: linear-gradient(135deg, var(--interactive-success) 0%, var(--color-green) 100%);
+		color: var(--text-on-accent);
+		border-color: var(--color-green);
+		font-weight: 700;
+		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+		margin-left: 8px;
+	}
+}
+
+.fgroup-indicator-wrapper {
+	flex: 1;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.subgroup-indicator.fgroup-indicator-active {
+	background: linear-gradient(135deg, var(--interactive-success) 0%, var(--color-green) 100%);
+	color: white;
+	border-color: var(--color-green);
+	font-weight: 700;
+	font-size: 11px;
+	width: auto;
+	min-width: 24px;
+	padding: 0 8px;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.nav-buttons-spacer {
+	flex: 1;
+}
+
+// FGroup indicators in navigation header (clickable)
+.fgroup-indicators {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	margin-right: 16px;
+}
+
+.fgroup-indicator {
+	width: 24px;
+	height: 24px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 50%;
+	background-color: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: 11px;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s ease-in-out;
+	user-select: none;
+	cursor: pointer;
+
+	&:hover {
+		background-color: var(--background-modifier-hover);
+		border-color: var(--background-modifier-border-hover);
+		transform: translateY(-1px);
+	}
+
+	&:active {
+		transform: translateY(0);
+	}
+
+	&.is-active {
+		background: linear-gradient(135deg, var(--interactive-accent) 0%, var(--interactive-accent-hover) 100%);
+		color: var(--text-on-accent);
+		border-color: var(--interactive-accent);
+		box-shadow: 0 0 0 2px var(--interactive-accent-hover), 0 2px 4px rgba(0, 0, 0, 0.15);
+		font-weight: 700;
+		transform: translateY(-1px);
+	}
 }
